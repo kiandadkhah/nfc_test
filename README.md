@@ -1,4 +1,4 @@
-# KIANEX PTS50N1 — Companion Application (v4.0.1)
+# KIANEX PTS50N1 — Companion Application (v4.1.0)
 
 Flutter companion app for the **KIANEX PTS50N1 / PST50R1** programmable
 single-relay timer. The app plans timer programs, validates the command
@@ -9,7 +9,26 @@ defined in `PST50R1_SourceOfTruth` (SOT v3.1-Final).
 > Android only. iOS was removed from the delivery scope («فقط app برای
 > اندروید ساخته می‌شود»).
 
-## What is new in v4.0.1 (CI build fix release)
+## What is new in v4.1.0 (field-report release: permissions, real map,
+chain ordering, time UX, NFC protocol fixes)
+
+Based on the v4.0.1 field test (installed APK + exported application log
+`لاگر.html`) and the product identification URL confirmed by KIANEX
+(`https://kianex.co/products/pts50r1`).
+
+| # | Field report | Fix in v4.1.0 |
+|---|--------------|---------------|
+| 1 | The app must ask for the permissions at start and ask the user to turn NFC and location on | **Startup system gate** (`system_gate.dart`): NFC hardware detection (absent → explanatory notice), NFC off → guidance into the system NFC panel (native `Settings.ACTION_NFC_SETTINGS` channel), location permission requested at the first start, denied-forever → app settings, service off → location settings. A readiness strip on the home screen stays visible until everything is ready |
+| 2 | Location screen: the position is not shown on a real map; manual entry must be a map picker | Real OpenStreetMap (flutter_map, no API key) shows the relay position with an accuracy chip; «ورود دستی مختصات» opens a full-screen picker — tap moves the marker, «موقعیت فعلی گوشی» recenters, «تایید» stores the coordinates |
+| 3 | The paragraph under the location screen leaks implementation data | Replaced by a formal privacy notice («این موقعیت، مبنای محاسبه زمان طلوع و غروب خورشید در دستگاه است …») — no registers, no block numbers |
+| 4 | Bug 2 — the command chain is not sorted by time from 00:00 | The chain is **auto-sorted on every add/edit/delete** with a year-stable strategy: sunrise-anchored commands → fixed times (ascending from 00:00) → sunset-anchored commands. The same order is used by the UI, the validators and the device payload (`buildProgramWritePlan`) — one order everywhere; chains persisted by older versions are re-sorted on restore |
+| 5 | Sunrise/sunset move through the year — separate them from rule R-3; choose a strategy so a fixed hour cannot collide with them | **R-03 (same action adjacency) is exempt for solar commands** — their real time moves through the year, so static adjacency is meaningless. Fixed↔solar collisions are handled by the **annual overlap analysis** (`astroOverlapWarnings`): the NOAA sunrise/sunset sweep of the whole year is computed for the stored location, and when a fixed minute falls inside the sweep the editor shows the exact coinciding date range and the number of days — the user approves explicitly before saving (non-blocking, informational) |
+| 6 | UI/UX — the up/down steppers hide the value under the finger; a 720-minute duration takes 144 taps | All three time inputs reworked (`time_edit_fields.dart`): «ساعت مشخص» → wheel-picker sheet (value always visible, one gesture to any time); «انحراف از طلوع/غروب» and «مدت روشن/خاموش بودن» → sheet with a 5-minute-step slider, quick-value chips and ±5 fine buttons — 720 minutes is one drag instead of 144 taps |
+| 7 | Messages must appear at the top of the screen | All toasts replaced by a top overlay banner (`app_toasts.dart`) — slides down from the safe area, auto-dismisses, tap to close; never overlapped by the thumb or the black NFC footer |
+| 8 | NFC still does not communicate (log: `01 03` error codes, `Communication error`, `system info unknown`) | **Protocol root causes fixed** (`tag_link.dart`): Read Multiple Blocks was issued with command code `0x2A` — that is **Lock DSFID** in ISO 15693-3 — now `0x23`; Get System Info is tried **standard first** (the PE-flagged variant stayed silent on the field phone/tag combination), and the MEM_SIZE parser now accepts both the ST25 3-byte layout (16-bit block count, LSB first) and the classic ISO layout — the ST25DV16KC answers 512 × 4 B and the `system info unknown` fallback is gone; ISO error texts in the log corrected (01 = not supported, 02 = not recognised) |
+| 9 | Product identification URL | `NdefContract.productUrl = https://kianex.co/products/pts50r1` — the factory NDEF URI record (blocks 1..15, well-known type U, prefix code 0x04) is read for identification; any PTS50-family product page on the factory domain (`https://kianex.co/products/pts50…`) is accepted; the app never rewrites the onboarding area |
+
+## What was new in v4.0.1 (CI build fix release)
 
 The v4.0.0 GitHub Actions build failed in the `Analyze code` and `Run tests`
 steps. v4.0.1 fixes every reported issue and **reproduces the complete CI
@@ -49,15 +68,23 @@ pipeline locally with the exact CI Flutter version (3.50.1)**:
   blocks 16..431 (planning area, app-writable) and reads blocks 504..511
   (logger area, MCU-owned). Blocks 0..15 (CC + NDEF) are factory-written
   and never rewritten (R-01).
-* **Addressing**: tags larger than 256 blocks use the extended command set
-  — `Protocol_Extension` flag + 2-byte block number:
-  `0x30` Extended Read Single Block, `0x31` Extended Write Single Block,
-  `0x33` Extended Read Multiple Blocks, `0x3B` Extended Get System Info.
-  Smaller tags fall back to the standard `0x20/0x21/0x23/0x2B` set with
-  1-byte block numbers.
-* **Writes**: `Option` flag set (ISO 15693 requirement); each EEPROM block
-  write takes ≈ 5 ms. Retry-once covers the RF/I²C arbitration window of
-  SOT §4.1 (busy `0Fh` answers).
+* **Addressing**: the SAME ISO command codes serve every tag size —
+  Read Single Block `0x20`, Write Single Block `0x21`, Read Multiple
+  Blocks `0x23`, Get System Info `0x2B`. Tags larger than 256 blocks
+  (ST25DV16K/64K) address blocks with the `Protocol_Extension` flag
+  (bit 3, 0x08) + 2-byte block number; smaller tags use the 1-byte
+  form of the same commands. **Pitfalls verified against the field
+  log**: the codes `0x30/0x31/0x33/0x3B` are NOT an ISO extended
+  command set (`0x2A` is Lock DSFID — never use it as a read), the
+  `Option` flag is rejected by some Type 5 models, and Get System
+  Info answers silently on some phone/tag pairs when PE-flagged — so
+  the link probes block 0 after open and falls back to standard
+  addressing when the tag rejects the extension (`iso15693ErrorText`).
+* **Writes**: plain Write Single Block — NO option flag (the
+  write-verify variant is not supported by every Type 5 model and was
+  one of the rejected combinations in the field logs); each EEPROM
+  block write takes ≈ 5 ms. Retry-once covers the RF/I²C arbitration
+  window of SOT §4.1 (busy `0Fh` answers).
 * **Model identification** (protocol step 1): valid Type 5 CC (magic `E1`),
   factory NDEF URI carrying the KIANEX marker, tag memory ≥ 512 × 4 B.
   `IC_REF` and the NDEF URI are logged for diagnostics instead of a
@@ -136,8 +163,13 @@ flutter build apk --release
 `.github/workflows/flutter-build.yml` builds the release APK on every
 push/PR and uploads it as the artifact `kianex-pts50n1-release-apk`
 (checkout@v7, setup-java@v6, flutter-action@v2, upload-artifact@v7 —
-Node 24 compatible, no deprecation warnings). Every CI step was locally
-reproduced with Flutter 3.50.1 / Dart 3.14.0 before this release. The
+Node 24 compatible, no deprecation warnings). The v4.0.1 pipeline was
+fully reproduced locally with Flutter 3.50.1 / Dart 3.14.0 (analyze
+0 issues, all unit tests green) and v4.1.0 ships the same pipeline —
+the release APK of this version is produced by the GitHub Actions run
+of this repository.
+
+The
 first CI build additionally downloads the Android NDK (≈ 2.5 GB, required
 by the `jni` native layer of `flutter_nfc_kit`) — later builds are cached
 and fast.
@@ -162,5 +194,3 @@ and fast.
 * Q-05 — disabled programs are never part of the payload.
 * Q-10 + R-01..R-04 — chain rules enforced in the editor.
 * RC-10 — two failed attempts lead to the power-off guidance dialog.
-#   n f c _ t e s t  
- 

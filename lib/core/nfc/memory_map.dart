@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import '../constants/domain.dart';
 import '../crypto/crc32_stm32.dart';
 import '../models/program.dart';
+import '../validation/validators.dart';
 
 /// Block addresses and register positions (Byte_0 is the first byte).
 abstract final class SotMemoryMap {
@@ -242,11 +243,15 @@ WritePlan buildProgramWritePlan({
 
   for (final p in enabledPrograms) {
     // Encode the chain; remember the head event number of this program.
+    // The chain order is the sorted order (sunrise group → fixed times →
+    // sunset group) — the same order the UI displays, so the device
+    // executes exactly what the user sees. [v4.1 chain sorting]
     final head = eventNo + 1;
-    for (var i = 0; i < p.events.length; i++) {
-      final ev = p.events[i];
+    final sortedEvents = sortChain(p.events);
+    for (var i = 0; i < sortedEvents.length; i++) {
+      final ev = sortedEvents[i];
       eventNo += 1;
-      final next = i + 1 < p.events.length ? eventNo + 1 : null;
+      final next = i + 1 < sortedEvents.length ? eventNo + 1 : null;
       final timerAddr = ev.cmd == RelayCommand.timer ? ensureTimer(ev) : null;
       img.setEvent(eventNo, ev, next, timerAddr);
     }

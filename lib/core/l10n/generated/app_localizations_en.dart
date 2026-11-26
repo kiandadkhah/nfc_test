@@ -545,7 +545,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get gpsUse =>
-      'How it is used: the app fits Chebyshev coefficients over a year of sunrise/sunset samples at this location — 24 sixteen-bit Q14 values written to blocks 416–427. The MCU evaluates them daily in fixed point.';
+      'This location is the reference for the device\'s sunrise and sunset calculation. It is stored only on your phone and on the device — it is never shared with any other service.';
 
   @override
   String get gpsAccuracy => 'Accuracy ±15 m';
@@ -1544,4 +1544,109 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get idFailNfcOff =>
       'The phone NFC adapter is not enabled. Turn NFC on from the quick settings and try again.';
+
+  @override
+  String get evFixedTimeLabel => 'Run time';
+
+  @override
+  String get evFixedPickerTitle => 'Set the run time';
+
+  @override
+  String get offsetPickerTitle => 'Set the offset from sunrise/sunset';
+
+  @override
+  String get offsetHint =>
+      'Offset from the astronomical base, 0 to 60 minutes in 5-minute steps.';
+
+  @override
+  String get phaseOnLabel => 'ON duration';
+
+  @override
+  String get phaseOffLabel => 'OFF duration';
+
+  @override
+  String get phaseOnPickerTitle => 'Set the ON duration';
+
+  @override
+  String get phaseOffPickerTitle => 'Set the OFF duration';
+
+  @override
+  String get plusMinute => '+';
+
+  @override
+  String get minusMinute => '−';
+
+  @override
+  String get chainSortNote =>
+      'The chain is sorted automatically by execution time — sunrise commands first, then the fixed-time commands from 00:00, then the sunset commands. Every new command takes its time-based position on its own.';
+
+  @override
+  String astroToday(String t) {
+    return 'Today: $t';
+  }
+
+  @override
+  String get overlapTitle => 'Annual coincidence notice';
+
+  @override
+  String overlapDetail(
+      String time, String base, String days, String from, String to) {
+    return 'The fixed command $time coincides with the $base command on $days days of the year (from $from to $to).';
+  }
+
+  @override
+  String get overlapNote =>
+      'This is normal: sunrise and sunset move through the year. The device runs the commands in chain order; at the shared instant the later chain entry wins. You can keep or adjust the times.';
+
+  @override
+  String get overlapAccept => 'Save anyway';
+
+  @override
+  String get gateNfcOffTitle => 'NFC is off';
+
+  @override
+  String get gateNfcOffText =>
+      'The NFC adapter of your phone is off. The app needs NFC to identify the relay and transfer programs. Please turn NFC on.';
+
+  @override
+  String get gateNfcMissing =>
+      'This phone has no NFC hardware — the relay cannot be reached from this device.';
+
+  @override
+  String get gateLocAsked =>
+      'Location permission requested — it is used only to find the sunrise and sunset times.';
+
+  @override
+  String get gateLocPermTitle => 'Location permission needed';
+
+  @override
+  String get gateLocPermText =>
+      'The app needs the location permission to compute the sunrise and sunset times of your area. Please grant the permission in the app settings.';
+
+  @override
+  String get gateLocServiceTitle => 'Location service is off';
+
+  @override
+  String get gateLocServiceText =>
+      'The phone\'s location service is off. Turn it on so the app can find your position for the sunrise/sunset calculation.';
+
+  @override
+  String get gateGoSettings => 'Open settings';
+
+  @override
+  String get gateLater => 'Later';
+
+  @override
+  String get gateStripHint =>
+      'NFC or location is not ready — some features cannot work until it is fixed.';
+
+  @override
+  String get gpsMapTitle => 'Pick the position on the map';
+
+  @override
+  String get gpsMapHint =>
+      'Tap anywhere on the map to move the marker, then confirm.';
+
+  @override
+  String get gpsPhonePos => 'Phone position';
 }

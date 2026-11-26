@@ -4,11 +4,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/constants/domain.dart';
 import '../../core/models/program.dart';
+import '../../core/solar/solar_events.dart';
 import '../../core/state/app_providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
 import '../../core/validation/validators.dart';
 import '../../state/providers.dart';
+import '../../core/widgets/app_toasts.dart';
 
 /// Main run-time text of an event — shared by the chain list and the
 /// rule-violation messages.
@@ -209,6 +211,17 @@ class ChainScreen extends ConsumerWidget {
       return const SizedBox.shrink();
     }
     final violations = chainRuleViolations(draft.events);
+    // v4.1 — today's resolved sunrise/sunset for the solar commands of the
+    // chain (the saved location feeds the same NOAA model as the payload).
+    final settings = ref.watch(settingsProvider);
+    final today = solarTimesFor(
+      year: DateTime.now().year,
+      month: DateTime.now().month,
+      day: DateTime.now().day,
+      latitude: settings.gpsLat,
+      longitude: settings.gpsLng,
+      utcOffsetHours: settings.utcOffsetHours,
+    );
     final capacityOk = eventCapacityOk(
       programs.programs,
       draftEvents: draft.events,
@@ -237,12 +250,25 @@ class ChainScreen extends ConsumerWidget {
             l.chainSub(draft.name, _cycleName(l, draft.cycle)),
             style: TextStyle(fontSize: 11.5, color: Theme.of(context).hintColor),
           ),
+          const SizedBox(height: 4),
+          // v4.1 — the chain auto-sorts by time on every add/edit; solar
+          // commands keep their own groups (sunrise → fixed → sunset).
+          Text(
+            l.chainSortNote,
+            style: TextStyle(
+                fontSize: 10.5, height: 1.9, color: Theme.of(context).hintColor),
+          ),
           const SizedBox(height: 12),
           if (draft.events.isEmpty)
             _empty(context, ref, l)
           else
             for (var i = 0; i < draft.events.length; i++)
-              _chainStep(context, ref, l, fa, draft.events[i], i),
+              _chainStep(context, ref, l, fa, draft.events[i], i,
+                  astroToday: draft.events[i].type == EventType.astro
+                      ? (draft.events[i].astro == SolarBase.sunrise
+                          ? today.sunriseMinutes
+                          : today.sunsetMinutes)
+                      : null),
           if (violations.isNotEmpty) ...[
             const SizedBox(height: 8),
             _banner(
@@ -333,20 +359,16 @@ class ChainScreen extends ConsumerWidget {
                 ? () {
                     final ok = ref.read(programsProvider).saveDraft();
                     if (!ok) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            violations.isNotEmpty
-                                ? l.rulesBlock(faNumInt(fa, violations.length))
-                                : l.capacityBlock,
-                          ),
-                        ),
+                      showAppMessage(
+                        context,
+                        violations.isNotEmpty
+                            ? l.rulesBlock(faNumInt(fa, violations.length))
+                            : l.capacityBlock,
+                        isError: true,
                       );
                       return;
                     }
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(l.programSaved(draft.name))),
-                    );
+                    showAppMessage(context, l.programSaved(draft.name));
                     context.go('/home');
                   }
                 : null,
@@ -442,7 +464,8 @@ class ChainScreen extends ConsumerWidget {
   }
 
   Widget _chainStep(BuildContext context, WidgetRef ref, AppLocalizationsX l, bool fa,
-      Event ev, int index) {
+      Event ev, int index,
+      {int? astroToday}) {
     final icon = ev.type == EventType.fixed
         ? Icons.schedule
         : (ev.astro == SolarBase.sunrise ? Icons.wb_twilight : Icons.nightlight_round);
@@ -522,9 +545,7 @@ class ChainScreen extends ConsumerWidget {
                           visualDensity: VisualDensity.compact,
                           onPressed: () {
                             ref.read(programsProvider).removeDraftEvent(index);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(l.eventRemoved)),
-                            );
+                            showAppMessage(context, l.eventRemoved);
                           },
                           icon: const Icon(Icons.delete_outline, size: 17),
                         ),
@@ -533,6 +554,19 @@ class ChainScreen extends ConsumerWidget {
                     Text(cmd,
                         style: TextStyle(
                             fontSize: 11, height: 1.7, color: Theme.of(context).hintColor)),
+                    // v4.1 — the solar command's real time today, so the
+                    // moving astronomical base is always transparent.
+                    if (astroToday != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 3),
+                        child: Text(
+                          l.astroToday(
+                              '${num2(fa, astroToday ~/ 60)}:${num2(fa, astroToday % 60)}'),
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: Theme.of(context).hintColor),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -671,9 +705,7 @@ class ProgramsEditScreen extends ConsumerWidget {
     if (ok == true) {
       ref.read(programsProvider).deleteAt(ref.read(programsProvider).programs.indexOf(p));
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l.programDeleted(p.name))),
-        );
+        showAppMessage(context, l.programDeleted(p.name));
       }
     }
   }

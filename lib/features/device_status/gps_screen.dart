@@ -1,16 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../core/state/app_providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
+import '../../core/widgets/app_toasts.dart';
 import '../../state/providers.dart';
 
 /// Location settings — the real GPS position of the relay is the basis for
-/// the solar (Chebyshev) coefficients. The coordinates are persisted and
-/// used by the real NFC write payload; manual entry stays available as a
-/// fallback (e.g. emulators without GNSS).
+/// the solar (Chebyshev) coefficients. v4.1: the position is shown on a
+/// REAL map and manual entry is marker picking on the same map (the fake
+/// grid painter and the numeric-only dialog are removed). If the phone's
+/// location service is off or the permission is missing, the user is
+/// guided straight into the matching system settings screen.
 class GpsScreen extends ConsumerStatefulWidget {
   const GpsScreen({super.key});
 
@@ -27,6 +32,7 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
     final l = L(context);
     final fa = isFa(context);
     final settings = ref.watch(settingsProvider);
+    final latLng = LatLng(settings.gpsLat, settings.gpsLng);
 
     return Scaffold(
       appBar: AppBar(title: Text(l.gpsTitle)),
@@ -36,43 +42,61 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
           Text(l.gpsSub, style: TextStyle(fontSize: 11.5, color: Theme.of(context).hintColor)),
           const SizedBox(height: 12),
           Card(
-            child: Container(
-              height: 180,
-              decoration: const BoxDecoration(
-                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF39424D), Color(0xFF232B33)],
-                ),
-              ),
+            clipBehavior: Clip.antiAlias,
+            margin: EdgeInsets.zero,
+            child: SizedBox(
+              height: 240,
               child: Stack(
                 children: [
-                  Positioned.fill(
-                    child: CustomPaint(painter: _GridPainter()),
-                  ),
-                  Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.location_on, color: AppTheme.orange, size: 34),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.72),
-                            borderRadius: BorderRadius.circular(99),
-                          ),
-                          child: Text(l.gpsPin,
-                              style: const TextStyle(fontSize: 10, color: Colors.white)),
-                        ),
-                      ],
+                  FlutterMap(
+                    options: MapOptions(
+                      initialCenter: latLng,
+                      initialZoom: 11,
+                      interactionOptions: const InteractionOptions(
+                        flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                      ),
                     ),
+                    children: [
+                      TileLayer(
+                        urlTemplate:
+                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'ir.kianex.kianex_pts50n1_app',
+                      ),
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: latLng,
+                            width: 60,
+                            height: 60,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.location_on,
+                                    color: AppTheme.orange, size: 34),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.72),
+                                    borderRadius: BorderRadius.circular(99),
+                                  ),
+                                  child: Text(l.gpsPin,
+                                      style: const TextStyle(
+                                          fontSize: 9, color: Colors.white)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                   Positioned(
                     bottom: 10,
-                    right: 10,
+                    left: 10,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.72),
                         borderRadius: BorderRadius.circular(99),
@@ -81,9 +105,11 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
                         _fixing
                             ? l.gpsFixing
                             : (_lastAccuracy != null
-                                ? l.gpsAccm(faNumInt(fa, _lastAccuracy!.round()))
+                                ? l.gpsAccm(
+                                    faNumInt(fa, _lastAccuracy!.round()))
                                 : l.gpsAccuracy),
-                        style: const TextStyle(fontSize: 10, color: Color(0xFFD6DDE4)),
+                        style: const TextStyle(
+                            fontSize: 10, color: Color(0xFFD6DDE4)),
                       ),
                     ),
                   ),
@@ -126,7 +152,7 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed: () => _editLocation(context, ref, l),
+                      onPressed: () => _pickOnMap(context, latLng, l),
                       icon: const Icon(Icons.edit_location_alt_outlined),
                       label: Text(l.gpsManual),
                     ),
@@ -145,29 +171,38 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
 
   /// Real GPS fix — requests the location permission, reads the current
   /// position of the phone (the phone is mounted on/near the relay) and
-  /// persists it for the solar coefficients.
+  /// persists it for the solar coefficients. When the service is off or
+  /// the permission was denied, the user is guided to the matching
+  /// system-settings screen. [v4.1 field report]
   Future<void> _getRealFix(AppLocalizationsX l) async {
     final logger = ref.read(appLoggerProvider);
     setState(() => _fixing = true);
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        _fail(l.gpsServiceOff);
         logger.gps('GPS fix failed: location service disabled');
+        await _guideToSettings(
+          title: l.gateLocServiceTitle,
+          text: l.gateLocServiceText,
+          actionLabel: l.gateGoSettings,
+          open: () async => Geolocator.openLocationSettings(),
+        );
         return;
       }
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         logger.gps('GPS permission requested -> ${permission.name}');
-        if (permission == LocationPermission.denied) {
-          _fail(l.gpsDenied);
-          return;
-        }
       }
-      if (permission == LocationPermission.deniedForever) {
-        _fail(l.gpsDeniedForever);
-        logger.gps('GPS fix failed: permission denied forever');
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        logger.gps('GPS fix failed: permission ${permission.name}');
+        await _guideToSettings(
+          title: l.gateLocPermTitle,
+          text: l.gateLocPermText,
+          actionLabel: l.gateGoSettings,
+          open: () async => Geolocator.openAppSettings(),
+        );
         return;
       }
       final pos = await Geolocator.getCurrentPosition(
@@ -189,75 +224,72 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
           'utcOffset=$utcHours mocked=${pos.isMocked}');
       if (!mounted) return;
       setState(() => _lastAccuracy = pos.accuracy);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l.gpsUpdatedToast)),
-      );
+      showAppMessage(context, l.gpsUpdatedToast);
     } catch (e) {
       logger.gps('GPS fix failed: $e');
-      _fail(l.gpsTimeout);
+      if (mounted) showAppMessage(context, l.gpsTimeout, isError: true);
     } finally {
       if (mounted) setState(() => _fixing = false);
     }
   }
 
-  void _fail(String message) {
+  /// Guidance dialog → the matching system settings screen.
+  Future<void> _guideToSettings({
+    required String title,
+    required String text,
+    required String actionLabel,
+    required Future<void> Function() open,
+  }) async {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  /// Manual coordinate entry — persisted and used to fit the solar
-  /// coefficients written to blocks 416..427.
-  Future<void> _editLocation(BuildContext context, WidgetRef ref, AppLocalizationsX l) async {
-    final settings = ref.read(settingsProvider);
-    final latCtrl = TextEditingController(text: settings.gpsLat.toStringAsFixed(4));
-    final lngCtrl = TextEditingController(text: settings.gpsLng.toStringAsFixed(4));
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(l.gpsCoords),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+        title: Row(
           children: [
-            TextField(
-              controller: latCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-              decoration: InputDecoration(labelText: l.gpsLat),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: lngCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-              decoration: InputDecoration(labelText: l.gpsLng),
-            ),
+            const Icon(Icons.settings_suggest_outlined,
+                color: AppTheme.orangeDeep, size: 22),
+            const SizedBox(width: 8),
+            Expanded(child: Text(title, style: const TextStyle(fontSize: 15))),
           ],
         ),
+        content: Text(text, style: const TextStyle(fontSize: 12.5, height: 1.9)),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(l.cancel),
+            child: Text(L(dialogContext).gateLater),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(l.confirm),
+            child: Text(actionLabel),
           ),
         ],
       ),
     );
-    final lat = double.tryParse(latCtrl.text.replaceAll(',', '.'));
-    final lng = double.tryParse(lngCtrl.text.replaceAll(',', '.'));
-    if (ok == true && lat != null && lng != null && lat.abs() <= 90 && lng.abs() <= 180) {
-      await ref.read(settingsProvider).setLocation(latitude: lat, longitude: lng);
-      ref.read(appLoggerProvider).gps(
-          'manual location set: lat=$lat lng=$lng');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l.gpsUpdatedToast)),
-        );
+    if (ok == true) {
+      try {
+        await open();
+      } catch (_) {
+        // settings screen unavailable on this device — ignore
       }
-    } else if (ok == true && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l.gpsInvalid)),
-      );
+    }
+  }
+
+  /// Manual entry — marker picking on the real map. [v4.1 field report:
+  /// «ورودی دستی باید انتخاب نشانگر روی نقشه باشد»]
+  Future<void> _pickOnMap(BuildContext context, LatLng initial, AppLocalizationsX l) async {
+    final picked = await Navigator.of(context).push<LatLng>(
+      MaterialPageRoute(builder: (_) => MapPickerScreen(initial: initial)),
+    );
+    if (picked != null) {
+      await ref.read(settingsProvider).setLocation(
+            latitude: picked.latitude,
+            longitude: picked.longitude,
+          );
+      ref.read(appLoggerProvider).gps(
+          'manual location set on map: lat=${picked.latitude} lng=${picked.longitude}');
+      if (context.mounted) {
+        showAppMessage(context, l.gpsUpdatedToast);
+      }
     }
   }
 
@@ -272,21 +304,119 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
       );
 }
 
-class _GridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.07)
-      ..strokeWidth = 1;
-    const step = 26.0;
-    for (var x = 0.0; x < size.width; x += step) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-    }
-    for (var y = 0.0; y < size.height; y += step) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
-  }
+/// Full-screen map picker — tap moves the marker, «تأیید» returns the
+/// picked coordinates.
+class MapPickerScreen extends StatefulWidget {
+  const MapPickerScreen({required this.initial, super.key});
+
+  final LatLng initial;
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  State<MapPickerScreen> createState() => _MapPickerScreenState();
+}
+
+class _MapPickerScreenState extends State<MapPickerScreen> {
+  late LatLng _picked = widget.initial;
+  late final MapController _controller = MapController();
+
+  @override
+  Widget build(BuildContext context) {
+    final l = L(context);
+    return Scaffold(
+      appBar: AppBar(title: Text(l.gpsMapTitle)),
+      body: Column(
+        children: [
+          Expanded(
+            child: FlutterMap(
+              mapController: _controller,
+              options: MapOptions(
+                initialCenter: widget.initial,
+                initialZoom: 12,
+                onTap: (_, point) => setState(() => _picked = point),
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                ),
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'ir.kianex.kianex_pts50n1_app',
+                ),
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: _picked,
+                      width: 46,
+                      height: 46,
+                      child: const Icon(Icons.location_on,
+                          color: AppTheme.orange, size: 42),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(18)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.10),
+                    blurRadius: 12,
+                    offset: const Offset(0, -3),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '${l.gpsLat}: ${_picked.latitude.toStringAsFixed(4)}   '
+                    '${l.gpsLng}: ${_picked.longitude.toStringAsFixed(4)}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                  ),
+                  Text(l.gpsMapHint,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 10.5,
+                          height: 1.8,
+                          color: Theme.of(context).hintColor)),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            _controller.move(widget.initial, 12);
+                            setState(() => _picked = widget.initial);
+                          },
+                          icon: const Icon(Icons.my_location, size: 17),
+                          label: Text(l.gpsPhonePos),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () => Navigator.of(context).pop(_picked),
+                          icon: const Icon(Icons.check, size: 18),
+                          label: Text(l.confirm),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

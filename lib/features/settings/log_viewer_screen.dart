@@ -8,6 +8,7 @@ import '../../core/state/app_providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
 import '../../state/providers.dart';
+import '../../core/widgets/app_toasts.dart';
 
 /// Application log viewer — the in-app logger of the settings screen.
 /// Lists the recorded events, and lets the test engineer export the full
@@ -250,9 +251,7 @@ class _LogViewerScreenState extends ConsumerState<LogViewerScreen> {
     } catch (e) {
       logger.error('log export failed: $e');
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l.logExportFailed)),
-        );
+        showAppMessage(context, l.logExportFailed);
       }
     }
   }
@@ -262,9 +261,7 @@ class _LogViewerScreenState extends ConsumerState<LogViewerScreen> {
     await Clipboard.setData(ClipboardData(text: logger.exportText()));
     logger.action('log copied to clipboard');
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l.logCopiedToast)),
-      );
+      showAppMessage(context, l.logCopiedToast);
     }
   }
 
@@ -289,9 +286,7 @@ class _LogViewerScreenState extends ConsumerState<LogViewerScreen> {
     if (ok == true) {
       await ref.read(appLoggerProvider).clear();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l.logClearedToast)),
-        );
+        showAppMessage(context, l.logClearedToast);
       }
     }
   }

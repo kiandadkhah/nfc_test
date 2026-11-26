@@ -1,22 +1,27 @@
 /// Byte-level link to the ST25DV16KC tag — NFC Forum Type 5 (ISO/IEC
 /// 15693), 512 × 4-byte blocks, 2048 bytes of user memory.
 ///
-/// The command layer follows the ST25DV04KC/16KC/64KC datasheet (RF
-/// commands chapter) and is adaptive to other Type 5 tag models:
+/// Command layer — ST25DV datasheet (DS13921) ISO 15693 command set:
+///   · Read Single Block 0x20, Write Single Block 0x21,
+///     Read Multiple Blocks 0x23, Get System Info 0x2B;
 ///   · tags with more than 256 blocks (ST25DV16K/64K) are addressed with
-///     the EXTENDED command set — Protocol_Extension flag + 2-byte block
-///     number: 0x30 Extended Read Single Block, 0x31 Extended Write Single
-///     Block, 0x33 Extended Read Multiple Blocks, 0x3B Extended Get
-///     System Info;
+///     the PROTOCOL EXTENSION flag (bit 3, 0x08) — the block number
+///     becomes 16-bit while the command codes stay the same. The earlier
+///     builds mistakenly used a fictitious "extended command set"
+///     (0x30/0x31/0x33/0x3B): those codes are the mailbox commands of the
+///     datasheet, so every read was rejected with ISO error 0x03
+///     («option not supported») — the root cause of the v4.0.x field
+///     failures, fixed here;
 ///   · tags with up to 256 blocks (ST25DV04K, ST25TV…) use the standard
-///     command set with 1-byte block numbers (0x20/0x21/0x23/0x2B).
+///     1-byte block numbers (same command codes, PE flag = 0).
 /// Because of this, the app works with any ISO 15693 Type 5 tag that has
 /// enough memory for the shared-memory layout, not only ST25DV16KC.
 ///
-/// Request flag bytes (ISO 15693-3): bit1 sub-carrier, bit2 data rate,
-/// bit3 inventory, bit4 select / protocol-extension, bit5 address,
-/// bit6 option, bit7-8 RFU. The link always talks to a single tag in the
-/// field, so requests are non-addressed (no UID byte).
+/// Request flag bytes (ISO 15693-3): bit1 sub-carrier 0x01, bit2 data rate
+/// 0x02, bit3 inventory 0x04, bit4 protocol extension 0x08, bit5 select
+/// 0x10, bit6 address 0x20, bit7 option 0x40, bit8 RFU 0x80. The link
+/// always talks to a single tag in the field, so requests are
+/// non-addressed (no UID byte).
 library;
 
 import 'dart:typed_data';
@@ -56,24 +61,34 @@ class TagLinkException implements Exception {
       'TagLinkException($message${errorCode == null ? '' : ', code=0x${errorCode!.toRadixString(16)}'})';
 }
 
+/// Human-readable meaning of the ISO 15693-3 error codes (datasheet
+/// table «Error codes») — used in the log so field reports are
+/// self-explanatory.
+String iso15693ErrorText(int code) => switch (code) {
+      0x01 => 'command not supported',
+      0x02 => 'command not recognised',
+      0x03 => 'option not supported',
+      0x0F => 'unknown error (tag busy or RF condition)',
+      0x10 => 'block not available',
+      0x11 => 'block already locked',
+      0x12 => 'block locked, unreadable',
+      0x13 => 'block not successfully written/locked',
+      0x14 => 'block not successfully written',
+      _ => 'error 0x${code.toRadixString(16)}',
+    };
+
 // ISO 15693-3 request flag bits (ST25DV datasheet tables 94/95):
-// bit1 sub-carrier 0x01, bit2 data rate 0x02, bit3 inventory 0x04,
-// bit4 protocol extension 0x08, bit5 select 0x10, bit6 address 0x20,
-// bit7 option 0x40, bit8 RFU 0x80. The link talks to a single tag in
-// non-addressed mode, so only these three flags are ever set:
 const int _flagDataRateHigh = 0x02;
 const int _flagProtocolExtension = 0x08;
-const int _flagOption = 0x40;
 
-// Command codes — standard and extended (T5T extended addressing).
+// Command codes — the SAME codes serve standard and extended addressing;
+// the protocol-extension flag selects the 16-bit block number.
+// CAUTION: 0x2A is Lock DSFID — a wrong multi-read code would address a
+// destructive/irrelevant command instead of reading (field-log lesson).
 const int _cmdReadSingleBlock = 0x20;
 const int _cmdWriteSingleBlock = 0x21;
 const int _cmdReadMultipleBlocks = 0x23;
 const int _cmdGetSystemInfo = 0x2B;
-const int _cmdExtReadSingleBlock = 0x30;
-const int _cmdExtWriteSingleBlock = 0x31;
-const int _cmdExtReadMultipleBlocks = 0x33;
-const int _cmdExtGetSystemInfo = 0x3B;
 
 /// ISO 15693 response flag: bit 0 = error.
 const int _respErrorFlag = 0x01;
@@ -96,7 +111,7 @@ class TagSystemInfo {
   final int dsfid;
   final int afid;
 
-  /// True when the tag reports 2-byte block addressing (MOI flag).
+  /// True when the tag uses 2-byte block addressing (MOI / geometry rule).
   final bool twoByteAddressing;
   final List<int> raw;
 
@@ -134,8 +149,12 @@ class Iso15693TagLink implements TagLink {
 
   /// The polled tag metadata (id / dsfId available for diagnostics).
   final NFCTag tag;
-  final TagSystemInfo _info;
+  TagSystemInfo _info;
   final void Function(String event)? _onEvent;
+
+  /// Set when the tag rejected the protocol-extension flag — the link
+  /// falls back to the standard 1-byte addressing (small Type 5 models).
+  bool _forceStandard = false;
 
   bool _open = false;
 
@@ -152,12 +171,15 @@ class Iso15693TagLink implements TagLink {
 
   void _event(String msg) => _onEvent?.call(msg);
 
-  /// Extended addressing for tags larger than 256 blocks (ST25DV16K/64K).
-  bool get _useExtended => _info.known ? _info.totalBlocks > 256 : true;
+  /// Extended addressing (16-bit block number) for tags larger than 256
+  /// blocks (ST25DV16K/64K) — unless the tag rejected the PE flag.
+  bool get _useExtended =>
+      !_forceStandard && (_info.known ? _info.totalBlocks > 256 : true);
 
   /// Polls for an ISO 15693 tag and opens the session. Reads the tag
-  /// system info (Extended Get System Info with standard fallback) so the
-  /// addressing mode and memory geometry match the actual tag model.
+  /// system info (Get System Info, extended first) so the addressing mode
+  /// and memory geometry match the actual tag model, then verifies the
+  /// addressing mode with a block-0 probe.
   /// [timeout] bounds the whole poll; returns null when the user never
   /// presented a compatible tag. Throws [TagLinkException]('nfc_disabled')
   /// when the phone NFC adapter is off or absent.
@@ -202,16 +224,63 @@ class Iso15693TagLink implements TagLink {
     final info = await _readSystemInfo(polled, onEvent);
     final link = Iso15693TagLink._(polled, info, onEvent: onEvent);
     link._open = true;
+
+    // Addressing self-check (field hardening): a tag that rejects the
+    // protocol-extension flag answers ISO error 0x01/0x02/0x03, and some
+    // phone/tag pairs answer a PE-flagged frame with plain silence (the
+    // v4.0.1 log — «Communication error», no error code). Both cases fall
+    // back to the standard 1-byte addressing; any other failure (busy /
+    // RF condition, already retried once by the link) propagates.
+    if (link._useExtended) {
+      try {
+        await link.readBlock(0);
+      } on TagLinkException catch (e) {
+        final reject = e.errorCode == null ||
+            e.errorCode == 0x01 ||
+            e.errorCode == 0x02 ||
+            e.errorCode == 0x03;
+        if (!reject) {
+          rethrow; // busy / RF condition — the caller retry policy handles it
+        }
+        onEvent?.call(
+            'open: extended addressing rejected '
+            '(${e.errorCode == null ? 'no response (silent PE frame)' : iso15693ErrorText(e.errorCode!)}) '
+            '— switching to standard addressing');
+        link._forceStandard = true;
+        if (link._info.totalBlocks > 256) {
+          // Without 16-bit addressing only the first 256 blocks are
+          // reachable; the shared-memory layout needs 432 — the memory
+          // check in the protocol will report it honestly.
+          link._info = TagSystemInfo(
+            totalBlocks: link._info.totalBlocks.clamp(0, 256),
+            blockSize: link._info.blockSize,
+            icRef: link._info.icRef,
+            dsfid: link._info.dsfid,
+            afid: link._info.afid,
+            twoByteAddressing: false,
+          );
+        }
+        await link.readBlock(0); // must succeed now, else the session fails
+      }
+    }
+
     onEvent?.call(
-        'open: uid=${polled.id} model=${info.modelName} blocks=${info.totalBlocks} '
-        'blockSize=${info.blockSize} icRef=0x${info.icRef.toRadixString(16)} '
-        'extended=${info.totalBlocks > 256}');
+        'open: uid=${polled.id} model=${link._info.modelName} blocks=${link._info.totalBlocks} '
+        'blockSize=${link._info.blockSize} icRef=0x${link._info.icRef.toRadixString(16)} '
+        'extended=${link._useExtended}');
     return link;
   }
 
   /// Best-effort system info read. Any failure falls back to the PST50R1
   /// target geometry (512 × 4 B) so the protocol can still proceed; every
   /// anomaly is reported through [onEvent].
+  ///
+  /// Order: the STANDARD Get System Info is tried FIRST — the ST25 family
+  /// already reports the memory size as 3 bytes (16-bit block count +
+  /// block size) in the standard response, and the v4.0.1 field log showed
+  /// the PE-flagged variant getting no answer at all on some phone/tag
+  /// combinations (silence ⇒ PlatformException). The PE variant stays as
+  /// the fallback for tags that implement ISO 15693-3:2009 amendment only.
   static Future<TagSystemInfo> _readSystemInfo(
       NFCTag tag, void Function(String event)? onEvent) async {
     const fallback = TagSystemInfo(
@@ -222,71 +291,89 @@ class Iso15693TagLink implements TagLink {
       afid: 0,
       twoByteAddressing: true,
     );
+    // Standard Get System Info — the command carries NO request parameters
+    // (the earlier 0x3B+0x1F frame was a malformed non-existent command and
+    // made the tag go silent).
     try {
-      // Extended Get System Info: flags = PE (0x08), param list =
-      // DSFID|AFI|MEM_SIZE|IC_REF|MOI (0x1F).
-      final resp = await FlutterNfcKit.transceive<Uint8List>(
-        Uint8List.fromList([_flagProtocolExtension, _cmdExtGetSystemInfo, 0x1F]),
-      );
-      final parsed = _parseSystemInfo(resp, extended: true);
-      if (parsed != null) return parsed;
-    } catch (e) {
-      onEvent?.call('ext get system info failed: $e');
-    }
-    try {
-      // Standard Get System Info: flags = high data rate (0x02), no params.
       final resp = await FlutterNfcKit.transceive<Uint8List>(
         Uint8List.fromList([_flagDataRateHigh, _cmdGetSystemInfo]),
       );
-      final parsed = _parseSystemInfo(resp, extended: false);
+      final parsed = _parseSystemInfo(resp);
       if (parsed != null) return parsed;
+      onEvent?.call('std get system info: response not parseable '
+          '(${_hex(resp)}) — trying protocol-extension variant');
     } catch (e) {
       onEvent?.call('std get system info failed: $e');
+    }
+    // Small pause so the RF layer settles before the second attempt.
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    // PE-flagged variant (ISO 15693-3:2009 amendment — 16-bit MEM_SIZE).
+    try {
+      final resp = await FlutterNfcKit.transceive<Uint8List>(
+        Uint8List.fromList([_flagDataRateHigh | _flagProtocolExtension, _cmdGetSystemInfo]),
+      );
+      final parsed = _parseSystemInfo(resp);
+      if (parsed != null) return parsed;
+      onEvent?.call('ext get system info: response not parseable (${_hex(resp)})');
+    } catch (e) {
+      onEvent?.call('ext get system info failed: $e');
     }
     onEvent?.call('system info unknown — using target geometry 512x4');
     return fallback;
   }
 
-  /// Parses an (Extended) Get System Info response body. Returns null when
-  /// the frame is not plausible — the caller then tries the next variant.
-  static TagSystemInfo? _parseSystemInfo(Uint8List resp, {required bool extended}) {
+  /// Parses a Get System Info response body. Frame layout per ISO 15693-3 /
+  /// ST25DV datasheet: FLAGS | info flags | UID (8 B, LSB first) | AFI? |
+  /// DSFID? | MEM_SIZE? | IC_REF?; the tag reports «value − 1» in both
+  /// MEM_SIZE fields.
+  ///
+  /// The MEM_SIZE field layout differs between families, so BOTH known
+  /// layouts are tried under the same plausibility check:
+  ///   A) 16-bit block count (LSB first) + 1-byte block size — the ST25
+  ///      family layout (ST25DV/ST25TV datasheets);
+  ///   B) 1-byte block size + 1-byte block count — the classic ISO layout
+  ///      of small Type 5 tags.
+  /// Returns null when no layout yields a plausible geometry — the caller
+  /// then tries the next request variant.
+  static TagSystemInfo? _parseSystemInfo(Uint8List resp) {
     final body = _stripCrcIfPresent(resp);
-    if (body.isEmpty) return null;
+    if (body.length < 11) return null; // flags + infoFlags + UID minimum
     if ((body[0] & _respErrorFlag) != 0) return null;
-    if (body.length < 2) return null;
     final infoFlags = body[1];
-    // UID always present (8 bytes, transmitted LSB first).
-    var i = 2 + 8;
-    if (body.length < i) return null;
+    var i = 10; // after FLAGS + infoFlags + UID
     var dsfid = 0;
     var afid = 0;
     var blocks = 0;
     var blockSize = 0;
     var icRef = 0;
-    var twoByte = false;
-    // Fields follow the information-flag bit order: DSFID, AFI, memory
-    // size, IC_REF. Extended memory size = 3 bytes (block-size byte +
-    // 16-bit block count); standard = 2 bytes (block size byte | block
-    // count byte) and is only reported by small tags.
-    if ((infoFlags & 0x01) != 0) {
-      if (body.length < i + 1) return null;
-      dsfid = body[i];
-      i += 1;
-    }
+    // Response body order: AFI, DSFID, memory size, IC_REF. Both AFI and
+    // DSFID are single bytes, so their order cannot shift the offsets.
     if ((infoFlags & 0x02) != 0) {
       if (body.length < i + 1) return null;
       afid = body[i];
       i += 1;
     }
+    if ((infoFlags & 0x01) != 0) {
+      if (body.length < i + 1) return null;
+      dsfid = body[i];
+      i += 1;
+    }
     if ((infoFlags & 0x04) != 0) {
-      if (extended) {
-        if (body.length < i + 3) return null;
-        blockSize = body[i] + 1;
-        blocks = (body[i + 1] << 8) | body[i + 2];
-        blocks += 1;
-        i += 3;
-      } else {
-        if (body.length < i + 2) return null;
+      if (body.length < i + 2) return null;
+      var parsed = false;
+      if (body.length >= i + 3) {
+        // Layout A — 16-bit block count first (ST25 family, 3-byte MEM_SIZE).
+        final aBlocks = ((body[i + 1] << 8) | body[i]) + 1;
+        final aSize = body[i + 2] + 1;
+        if (aSize >= 1 && aSize <= 32 && aBlocks >= 1 && aBlocks <= 4096) {
+          blocks = aBlocks;
+          blockSize = aSize;
+          i += 3;
+          parsed = true;
+        }
+      }
+      if (!parsed) {
+        // Layout B — block size first, 8-bit block count (classic ISO).
         blockSize = body[i] + 1;
         blocks = body[i + 1] + 1;
         i += 2;
@@ -297,16 +384,19 @@ class Iso15693TagLink implements TagLink {
       icRef = body[i];
       i += 1;
     }
-    // MOI flag (0x10): 1 = the tag uses 2-byte block addressing.
-    twoByte = (infoFlags & 0x10) != 0;
-    if (blockSize <= 0 || blockSize > 8 || blocks <= 0) return null;
+    if (blockSize <= 0 || blockSize > 32 || blocks <= 0 || blocks > 4096) {
+      return null;
+    }
+    // MOI flag (bit 4) mirrors the geometry rule: > 256 blocks ⇒ 2-byte
+    // block addressing. The addressing decision itself always uses the
+    // geometry, not the flag byte.
     return TagSystemInfo(
       totalBlocks: blocks,
       blockSize: blockSize,
       icRef: icRef,
       dsfid: dsfid,
       afid: afid,
-      twoByteAddressing: twoByte,
+      twoByteAddressing: blocks > 256,
       raw: body,
     );
   }
@@ -335,13 +425,7 @@ class Iso15693TagLink implements TagLink {
       ? [block & 0xFF, (block >> 8) & 0xFF]
       : [block & 0xFF];
 
-  int get _readCmd => _useExtended ? _cmdExtReadSingleBlock : _cmdReadSingleBlock;
-  int get _writeCmd => _useExtended ? _cmdExtWriteSingleBlock : _cmdWriteSingleBlock;
-  int get _readMultiCmd =>
-      _useExtended ? _cmdExtReadMultipleBlocks : _cmdReadMultipleBlocks;
-
-  int get _baseFlags =>
-      _useExtended ? _flagProtocolExtension : 0x00;
+  int get _baseFlags => _useExtended ? _flagProtocolExtension : 0x00;
 
   /// Sends one frame and returns the response body (CRC auto-stripped).
   /// Platform IO errors are normalized into [TagLinkException] so the
@@ -372,10 +456,11 @@ class Iso15693TagLink implements TagLink {
       throw TagLinkException('empty_${what}_response');
     }
     if ((body[0] & _respErrorFlag) != 0) {
-      throw TagLinkException(
-        'error_${what}_response',
-        errorCode: body.length > 1 ? body[1] : null,
-      );
+      final code = body.length > 1 ? body[1] : null;
+      if (code != null) {
+        _event('$what: tag rejected — ${iso15693ErrorText(code)}');
+      }
+      throw TagLinkException('error_${what}_response', errorCode: code);
     }
     return body;
   }
@@ -387,7 +472,7 @@ class Iso15693TagLink implements TagLink {
   @override
   Future<Uint8List> readBlock(int block) async {
     final body = await _retry(() => _respBody(
-          [_baseFlags | _flagDataRateHigh, _readCmd, ..._addr(block)],
+          [_baseFlags | _flagDataRateHigh, _cmdReadSingleBlock, ..._addr(block)],
           'read[$block]',
         ));
     if (body.length < 5) {
@@ -396,10 +481,12 @@ class Iso15693TagLink implements TagLink {
     return Uint8List.fromList(body.sublist(1, 5)); // Byte_0..Byte_3
   }
 
-  /// Reads [first]..[last] (inclusive) with Extended Read Multiple Blocks
-  /// in chunks. When a chunk crosses a tag memory-area boundary the tag
-  /// answers with an error (code 10h) — the chunk is then split recursively
-  /// down to single-block reads, so any factory area configuration works.
+  /// Reads [first]..[last] (inclusive) with Read Multiple Blocks (0x2A)
+  /// in chunks. The block count stays a single byte in both addressing
+  /// modes (values 00–FF mean 1–256 blocks). When a chunk crosses a tag
+  /// memory-area boundary the tag answers with an error (code 10h) — the
+  /// chunk is then split recursively down to single-block reads, so any
+  /// factory area configuration works.
   @override
   Future<List<Uint8List>> readBlockRange(int first, int last) async {
     final out = <Uint8List>[];
@@ -411,16 +498,12 @@ class Iso15693TagLink implements TagLink {
       while (!ok) {
         try {
           final count = end - b + 1;
-          final frame = _useExtended
-              ? [
-                  _baseFlags,
-                  _readMultiCmd,
-                  b & 0xFF,
-                  (b >> 8) & 0xFF,
-                  (count - 1) & 0xFF,
-                  ((count - 1) >> 8) & 0xFF,
-                ]
-              : [_baseFlags, _readMultiCmd, b & 0xFF, (count - 1) & 0xFF];
+          final frame = [
+            _baseFlags | _flagDataRateHigh,
+            _cmdReadMultipleBlocks,
+            ..._addr(b),
+            (count - 1) & 0xFF,
+          ];
           final body = await _respBody(frame, 'readMulti[$b..$end]');
           if (body.length < 1 + count * 4) {
             throw const TagLinkException('short_readmulti_response');
@@ -448,10 +531,12 @@ class Iso15693TagLink implements TagLink {
   @override
   Future<void> writeBlock(int block, Uint8List b0to3) async {
     final data = List<int>.generate(4, (i) => i < b0to3.length ? b0to3[i] : 0);
-    // Option flag (0x40) is mandatory for write commands per ISO 15693-3.
+    // Plain Write Single Block — no option flag (the option/write-verify
+    // variant is not supported by every Type 5 model and was one of the
+    // rejected combinations seen in the field logs).
     final frame = [
-      _baseFlags | _flagDataRateHigh | _flagOption,
-      _writeCmd,
+      _baseFlags | _flagDataRateHigh,
+      _cmdWriteSingleBlock,
       ..._addr(block),
       ...data,
     ];
@@ -464,6 +549,8 @@ class Iso15693TagLink implements TagLink {
 
   /// One retry after a short pause — covers the RF/I²C arbitration windows
   /// described in SOT §4.1 (tag busy while the MCU owns the I²C bus).
+  /// Command-level rejections (0x01/0x02/0x03) are NOT retried — the frame
+  /// itself is wrong and a pause cannot fix it.
   Future<T> _retry<T>(Future<T> Function() op) async {
     try {
       return await op();

@@ -7,11 +7,15 @@ import '../../core/models/program.dart';
 import '../../core/state/app_providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
+import '../../core/utils/jalali.dart';
 import '../../core/validation/validators.dart';
+import '../../core/widgets/app_toasts.dart';
+import '../../core/widgets/time_edit_fields.dart';
 import '../../state/providers.dart';
 
 /// Event editor — fixed / solar / timer forms with Q-06 clamping
-/// and Q-10 conflict prevention on save.
+/// and Q-10 conflict prevention on save. v4.1: wheel/slider time fields,
+/// sorted-chain rule checking and the annual fixed↔solar overlap notice.
 class EventEditorScreen extends ConsumerStatefulWidget {
   const EventEditorScreen({required this.editIndex, super.key});
 
@@ -49,22 +53,117 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
   bool get _phasesValid => _ev.cmd != RelayCommand.timer ||
       (isPhaseValid(_ev.onPhase) && isPhaseValid(_ev.offPhase));
 
-  void _save() {
+  /// Jalali month names for the overlap notice (formal, no abbreviations).
+  static const List<String> _faMonths = [
+    'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
+    'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند',
+  ];
+  static const List<String> _enMonths = [
+    'Farvardin', 'Ordibehesht', 'Khordad', 'Tir', 'Mordad', 'Shahrivar',
+    'Mehr', 'Aban', 'Azar', 'Dey', 'Bahman', 'Esfand',
+  ];
+
+  String _jalaliDate(bool fa, DateTime g) {
+    final j = gregorianToJalali(g);
+    final monthName = fa ? _faMonths[j.month - 1] : _enMonths[j.month - 1];
+    return '${faNumInt(fa, j.day)} $monthName';
+  }
+
+  String _actName(AppLocalizationsX l, Event ev) => switch (ev.cmd) {
+        RelayCommand.on => l.cmdOn,
+        RelayCommand.off => l.cmdOff,
+        RelayCommand.timer => l.cmdTimer,
+      };
+
+  /// Astro/fixed annual overlap notice — non-blocking; the user approves
+  /// it explicitly before the event is saved. [v4.1 strategy S]
+  Future<bool> _confirmOverlaps(AppLocalizationsX l, bool fa, List<Event> sortedMerged) async {
+    final settings = ref.read(settingsProvider);
+    final overlaps = astroOverlapWarnings(
+      sortedMerged,
+      latitude: settings.gpsLat,
+      longitude: settings.gpsLng,
+      utcOffsetHours: settings.utcOffsetHours,
+    );
+    final involvingCandidate = overlaps
+        .where((o) => o.fixedIndex == _candidatePos || o.astroIndex == _candidatePos)
+        .toList();
+    if (involvingCandidate.isEmpty) return true;
+
+    final astroEv = sortedMerged[involvingCandidate.first.astroIndex];
+    final fixedEv = sortedMerged[involvingCandidate.first.fixedIndex];
+    final o = involvingCandidate.first;
+    final detail = l.overlapDetail(
+      '${num2(fa, fixedEv.hh)}:${num2(fa, fixedEv.mm)}',
+      astroEv.astro == SolarBase.sunrise ? l.sunriseShort : l.sunsetShort,
+      faNumInt(fa, o.days),
+      _jalaliDate(fa, o.firstDate),
+      _jalaliDate(fa, o.lastDate),
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.info_outline, color: AppTheme.orangeDeep, size: 22),
+            const SizedBox(width: 8),
+            Expanded(child: Text(l.overlapTitle, style: const TextStyle(fontSize: 15))),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(detail, style: const TextStyle(fontSize: 12.5, height: 2)),
+            const SizedBox(height: 8),
+            Text(l.overlapNote, style: TextStyle(fontSize: 11, height: 1.9,
+                color: Theme.of(context).hintColor)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(l.overlapAccept),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  /// Position the candidate will occupy in the sorted chain (recomputed on
+  /// every rebuild; identical() lookup in candidateCheck is deterministic).
+  int get _candidatePos {
+    final programs = ref.read(programsProvider);
+    final existing = programs.draft?.events ?? [];
+    final without = <Event>[
+      for (var i = 0; i < existing.length; i++)
+        if (i != widget.editIndex) existing[i],
+    ];
+    final sorted = sortChain([...without, _ev]);
+    final pos = sorted.indexWhere((e) => identical(e, _ev));
+    return pos < 0 ? sorted.length - 1 : pos;
+  }
+
+  void _save() async {
     final l = L(context);
     final fa = isFa(context);
     final programs = ref.read(programsProvider);
     if (!_phasesValid) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(l.timerErr)));
+      showAppMessage(context, l.timerErr, isError: true);
       return;
     }
     final existing = programs.draft?.events ?? [];
     // R-01..R-04 — the candidate is checked in the exact position it will
-    // occupy, so adjacency is only evaluated against its real neighbours.
-    final violations = violationsWithCandidate(_ev, existing, skipIndex: widget.editIndex);
-    if (violations.isNotEmpty) {
-      final v = violations.first;
-      final other = v.a == _candidateIndex(existing) ? v.b : v.a;
+    // occupy after the automatic time-based sort. [v4.1]
+    final check = candidateCheck(_ev, existing, skipIndex: widget.editIndex);
+    if (check.violations.isNotEmpty) {
+      final v = check.violations.first;
+      final other = v.a == check.position ? v.b : v.a;
       final message = switch (v.rule) {
         ChainRule.sameTime =>
           v.minute != null
@@ -80,26 +179,26 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
           ),
         ChainRule.sameTimer => l.evRuleSameTimer(faNumInt(fa, other + 1)),
       };
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      showAppMessage(context, message, isError: true);
       return;
     }
+    // Annual fixed↔solar coincidence — informational, explicit consent.
+    final mergedSorted = sortChain([
+      for (var i = 0; i < existing.length; i++)
+        if (i != widget.editIndex) existing[i],
+      _ev,
+    ]);
+    final approved = await _confirmOverlaps(l, fa, mergedSorted);
+    if (!approved || !mounted) return;
+
     if (widget.editIndex >= 0) {
       programs.replaceDraftEvent(widget.editIndex, _ev);
     } else {
       programs.addDraftEvent(_ev);
     }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l.eventSaved)));
-    context.pop();
+    showAppMessage(context, l.eventSaved);
+    if (mounted) context.pop();
   }
-
-  int _candidateIndex(List<Event> existing) =>
-      widget.editIndex >= 0 && widget.editIndex < existing.length ? widget.editIndex : existing.length;
-
-  String _actName(AppLocalizationsX l, Event ev) => switch (ev.cmd) {
-        RelayCommand.on => l.cmdOn,
-        RelayCommand.off => l.cmdOff,
-        RelayCommand.timer => l.cmdTimer,
-  };
 
   @override
   Widget build(BuildContext context) {
@@ -208,38 +307,21 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
     );
   }
 
+  // v4.1 — one tappable field for hour:minute; the picker keeps the value
+  // visible while scrolling (the old up/down steppers hid it under the
+  // finger).
   List<Widget> _fixedForm(AppLocalizationsX l, bool fa) => [
-        // v3.0 — unified hour/minute setting: the value lives between its
-        // increase/decrease buttons (same pattern as «فاصله زمانی» and
-        // «مدت زمان روشن بودن»). No separate hour:minute display above.
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _stepper(
-              l,
-              fa,
-              value: num2(fa, _ev.hh),
-              unit: l.hourUnit,
-              label: l.hourRange,
-              onUp: () => _update(() => _ev.hh = (_ev.hh + 1) % 24),
-              onDown: () => _update(() => _ev.hh = (_ev.hh + 23) % 24),
-            ),
-            const SizedBox(width: 20),
-            _stepper(
-              l,
-              fa,
-              value: num2(fa, _ev.mm),
-              unit: l.minUnit,
-              label: l.minuteRange,
-              onUp: () => _update(() => _ev.mm = (_ev.mm + 1) % 60),
-              onDown: () => _update(() => _ev.mm = (_ev.mm + 59) % 60),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Center(
-          child: Text(l.evTimeFmt,
-              style: TextStyle(fontSize: 11, color: Theme.of(context).hintColor)),
+        TimeOfDayField(
+          label: l.evFixedTimeLabel,
+          title: l.evFixedPickerTitle,
+          confirmLabel: l.confirm,
+          hh: _ev.hh,
+          mm: _ev.mm,
+          hint: l.evTimeFmt,
+          onChanged: (hh, mm) => _update(() {
+            _ev.hh = hh;
+            _ev.mm = mm;
+          }),
         ),
       ];
 
@@ -262,20 +344,20 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
           onTap: () => _update(() => _ev.astro = SolarBase.sunset),
         ),
         const SizedBox(height: 16),
-        Center(
-          child: _stepper(
-            l,
-            fa,
-            value: faNumInt(fa, _ev.offsetMinutes),
-            unit: l.minUnit,
-            label: l.offsetLabel,
-            onUp: () => _update(() => _ev.offsetMinutes =
-                (_ev.offsetMinutes + DomainLimits.timerStepMinutes)
-                    .clamp(0, DomainLimits.astroOffsetMaxMinutes)),
-            onDown: () => _update(() => _ev.offsetMinutes =
-                (_ev.offsetMinutes - DomainLimits.timerStepMinutes)
-                    .clamp(0, DomainLimits.astroOffsetMaxMinutes)),
-          ),
+        MinutesField(
+          label: l.offsetLabel,
+          title: l.offsetPickerTitle,
+          confirmLabel: l.confirm,
+          plusLabel: l.plusMinute,
+          minusLabel: l.minusMinute,
+          value: _ev.offsetMinutes,
+          min: 0,
+          max: DomainLimits.astroOffsetMaxMinutes,
+          step: DomainLimits.timerStepMinutes,
+          quickValues: const [0, 10, 15, 20, 30, 45, 60],
+          icon: Icons.wb_twilight_outlined,
+          hint: l.offsetHint,
+          onChanged: (minutes) => _update(() => _ev.offsetMinutes = minutes),
         ),
         const SizedBox(height: 14),
         Text(l.signLabel, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
@@ -316,8 +398,8 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
   Widget _phaseEditor(AppLocalizationsX l, bool fa, bool onPhase) {
     final phase = onPhase ? _ev.onPhase : _ev.offPhase;
     final total = phase.totalMinutes;
-    // v3.0 — minutes-only duration setting: step 5 minutes, range 5..720,
-    // to remove the hour/minute ambiguity.
+    // v4.1 — slider + quick chips: the full 5..720 range is one drag;
+    // common values (15/30/60/120 …) are single taps.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -340,81 +422,29 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
           ],
         ),
         const SizedBox(height: 8),
-        Center(
-          child: _stepper(
-            l,
-            fa,
-            value: faNumInt(fa, total),
-            unit: l.minUnit,
-            label: l.phaseRange,
-            onUp: () => _update(() => phase.totalMinutes =
-                (phase.totalMinutes + DomainLimits.timerStepMinutes)
-                    .clamp(DomainLimits.timerStepMinutes, DomainLimits.timerPhaseMaxMinutes)),
-            onDown: () => _update(() => phase.totalMinutes =
-                (phase.totalMinutes - DomainLimits.timerStepMinutes)
-                    .clamp(DomainLimits.timerStepMinutes, DomainLimits.timerPhaseMaxMinutes)),
-          ),
+        MinutesField(
+          label: onPhase ? l.phaseOnLabel : l.phaseOffLabel,
+          title: onPhase ? l.phaseOnPickerTitle : l.phaseOffPickerTitle,
+          confirmLabel: l.confirm,
+          plusLabel: l.plusMinute,
+          minusLabel: l.minusMinute,
+          value: total,
+          min: DomainLimits.timerStepMinutes,
+          max: DomainLimits.timerPhaseMaxMinutes,
+          step: DomainLimits.timerStepMinutes,
+          quickValues: const [5, 15, 30, 60, 120, 240, 360, 720],
+          icon: onPhase ? Icons.power : Icons.power_off,
+          hint: l.phaseRange,
+          onChanged: (minutes) => _update(() => phase.totalMinutes = minutes),
         ),
         const SizedBox(height: 6),
-        Center(
-          child: Text(
-            phase.isValid ? l.phaseSum(faNumInt(fa, total)) : l.phaseInvalid,
-            style: TextStyle(
-              fontSize: 10.5,
-              color: phase.isValid ? Theme.of(context).hintColor : const Color(0xFFC0392B),
-            ),
+        Text(
+          phase.isValid ? l.phaseSum(faNumInt(fa, total)) : l.phaseInvalid,
+          style: TextStyle(
+            fontSize: 10.5,
+            color: phase.isValid ? Theme.of(context).hintColor : const Color(0xFFC0392B),
           ),
         ),
-      ],
-    );
-  }
-
-  Widget _stepper(
-    AppLocalizationsX l,
-    bool fa, {
-    required String value,
-    required String unit,
-    required String label,
-    required VoidCallback onUp,
-    required VoidCallback onDown,
-  }) {
-    return Column(
-      children: [
-        IconButton(
-          onPressed: onUp,
-          icon: const Icon(Icons.keyboard_arrow_up),
-          style: IconButton.styleFrom(
-            backgroundColor: AppTheme.slate900,
-            foregroundColor: Colors.white,
-          ),
-        ),
-        Container(
-          width: 76,
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            border: Border.all(color: Theme.of(context).dividerColor, width: 1.4),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            value,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-          ),
-        ),
-        IconButton(
-          onPressed: onDown,
-          icon: const Icon(Icons.keyboard_arrow_down),
-          style: IconButton.styleFrom(
-            backgroundColor: AppTheme.slate900,
-            foregroundColor: Colors.white,
-          ),
-        ),
-        // Unit caption under the value — part of the unified stepper pattern.
-        Text(unit, style: TextStyle(fontSize: 10.5, color: Theme.of(context).hintColor)),
-        const SizedBox(height: 2),
-        Text(label,
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 9.5, color: Theme.of(context).hintColor)),
       ],
     );
   }

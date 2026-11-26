@@ -15,6 +15,7 @@ library;
 
 import 'dart:async';
 
+import '../constants/domain.dart';
 import '../logging/app_logger.dart';
 import '../models/program.dart';
 import 'memory_map.dart';
@@ -239,11 +240,11 @@ class RealNfcService implements NfcService {
       );
       const requiredBlocks = SotMemoryMap.planningEndBlock + 1;
       final enoughMemory = link.totalBlocks >= requiredBlocks;
-      final marker = ndefUri.toLowerCase();
-      final modelMatched = marker.contains('kianex') ||
-          marker.contains('pst50r1') ||
-          marker.contains('pts50n1');
-      _log.nfc('identify: uri="$ndefUri" model=${info.modelName} '
+      // The factory NDEF URI identifies the product — the accepted prefix
+      // is the KIANEX PTS50 product page (NdefContract). [v4.1: exact URL]
+      final modelMatched = NdefContract.uriMatchesProduct(ndefUri);
+      _log.nfc('identify: uri="$ndefUri" expected="${NdefContract.productUrlPrefix}" '
+          'model=${info.modelName} '
           'blocks=${link.totalBlocks}/${link.blockSize}B '
           'icRef=0x${link.icRef.toRadixString(16)} '
           'enoughMemory=$enoughMemory modelMatched=$modelMatched');

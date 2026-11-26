@@ -9,6 +9,7 @@ import '../../core/utils/format.dart';
 import '../../core/utils/jalali.dart';
 import '../../core/widgets/nfc_hex_button.dart';
 import '../../state/providers.dart';
+import '../../core/widgets/app_toasts.dart';
 
 /// Write confirmation — reviews the payload in user-friendly terms (no
 /// register/block details) before starting the protocol, and exposes the
@@ -115,12 +116,12 @@ class _WriteConfirmScreenState extends ConsumerState<WriteConfirmScreen> {
     if (widget.mode == WriteMode.programAndSettings) {
       final programs = ref.read(programsProvider);
       if (programs.programs.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l.noProgramsToast)));
+        showAppMessage(context, l.noProgramsToast);
         return;
       }
       // Q-05: an all-disabled list has nothing to transfer.
       if (programs.enabledPrograms.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l.allDisabledToast)));
+        showAppMessage(context, l.allDisabledToast);
         return;
       }
     }
@@ -318,9 +319,7 @@ class _WriteProgressDialogState extends ConsumerState<WriteProgressDialog> {
                         onPressed: () {
                           ref.read(writeFlowProvider).ackSettingsBlocked();
                           Navigator.of(context).pop();
-                          ScaffoldMessenger.of(this.context).showSnackBar(
-                            SnackBar(content: Text(l.wpPwSetToast)),
-                          );
+                          showAppMessage(this.context, l.wpPwSetToast);
                         },
                         child: Text(l.wpPwAck),
                       ),
@@ -348,9 +347,7 @@ class _WriteProgressDialogState extends ConsumerState<WriteProgressDialog> {
                             onPressed: () {
                               ref.read(writeFlowProvider).cancel();
                               Navigator.of(context).pop();
-                              ScaffoldMessenger.of(this.context).showSnackBar(
-                                SnackBar(content: Text(l.wpPwCancelled)),
-                              );
+                              showAppMessage(this.context, l.wpPwCancelled);
                             },
                             child: Text(l.wpPwCancel),
                           ),
@@ -419,9 +416,7 @@ class _WriteProgressDialogState extends ConsumerState<WriteProgressDialog> {
                   TextButton(
                     onPressed: () {
                       // Approved escape path: back to the app environment.
-                      ScaffoldMessenger.of(this.context).showSnackBar(
-                        SnackBar(content: Text(l.wpBackToast)),
-                      );
+                      showAppMessage(this.context, l.wpBackToast);
                       Navigator.of(context).pop();
                     },
                     child: Text(l.wpBackApp, style: TextStyle(color: Colors.grey.shade400)),
@@ -558,9 +553,7 @@ class _WriteProgressDialogState extends ConsumerState<WriteProgressDialog> {
             onPressed: () {
               // Approved escape path: close the guidance and return to the app.
               Navigator.of(dialogContext).pop(); // close RC dialog
-              ScaffoldMessenger.of(this.context).showSnackBar(
-                SnackBar(content: Text(l.wpBackToast)),
-              );
+              showAppMessage(this.context, l.wpBackToast);
               Navigator.of(this.context).pop(); // close progress overlay
             },
             child: Text(l.rcBack),

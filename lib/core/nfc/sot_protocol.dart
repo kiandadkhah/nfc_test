@@ -6,6 +6,7 @@ library;
 
 import 'dart:typed_data';
 
+import '../constants/domain.dart';
 import '../crypto/crc32_stm32.dart';
 import '../logging/app_logger.dart';
 import '../models/program.dart';
@@ -182,8 +183,9 @@ class SotProtocol {
         switch (step) {
           case 1:
             // Read the onboarding area (blocks 0..15) and identify the tag:
-            // CC file must be a valid Type 5 CC (magic E1/E2), the NDEF
-            // product-page URI must carry the KIANEX model marker, and the
+            // CC file must be a valid Type 5 CC (magic E1/E2), the factory
+            // NDEF URI must point at the KIANEX product page
+            // (NdefContract — https://kianex.co/products/pts50…), and the
             // tag memory must cover the shared-memory layout (any larger
             // Type 5 model is accepted — multi-model NFC layer).
             final cc = await _link.readBlock(SotMemoryMap.blockCc);
@@ -195,10 +197,9 @@ class SotProtocol {
               throw const TagLinkException('not_type5_tag');
             }
             final ndefUri = await readOnboardingUri();
-            final marker = ndefUri.toLowerCase();
-            if (!marker.contains('kianex') &&
-                !marker.contains('pst50r1') &&
-                !marker.contains('pts50n1')) {
+            if (!NdefContract.uriMatchesProduct(ndefUri)) {
+              _log.nfc('step1: expected product URI prefix '
+                  '"${NdefContract.productUrlPrefix}" — got "$ndefUri"');
               throw TagLinkException('model_mismatch:$ndefUri');
             }
             const requiredBlocks = SotMemoryMap.planningEndBlock + 1;

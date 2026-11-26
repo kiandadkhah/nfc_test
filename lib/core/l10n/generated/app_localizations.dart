@@ -1061,7 +1061,7 @@ abstract class AppLocalizations {
   /// No description provided for @gpsUse.
   ///
   /// In en, this message translates to:
-  /// **'How it is used: the app fits Chebyshev coefficients over a year of sunrise/sunset samples at this location — 24 sixteen-bit Q14 values written to blocks 416–427. The MCU evaluates them daily in fixed point.'**
+  /// **'This location is the reference for the device\'s sunrise and sunset calculation. It is stored only on your phone and on the device — it is never shared with any other service.'**
   String get gpsUse;
 
   /// No description provided for @gpsAccuracy.
@@ -2785,6 +2785,187 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The phone NFC adapter is not enabled. Turn NFC on from the quick settings and try again.'**
   String get idFailNfcOff;
+
+  /// No description provided for @evFixedTimeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Run time'**
+  String get evFixedTimeLabel;
+
+  /// No description provided for @evFixedPickerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Set the run time'**
+  String get evFixedPickerTitle;
+
+  /// No description provided for @offsetPickerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Set the offset from sunrise/sunset'**
+  String get offsetPickerTitle;
+
+  /// No description provided for @offsetHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Offset from the astronomical base, 0 to 60 minutes in 5-minute steps.'**
+  String get offsetHint;
+
+  /// No description provided for @phaseOnLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'ON duration'**
+  String get phaseOnLabel;
+
+  /// No description provided for @phaseOffLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'OFF duration'**
+  String get phaseOffLabel;
+
+  /// No description provided for @phaseOnPickerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Set the ON duration'**
+  String get phaseOnPickerTitle;
+
+  /// No description provided for @phaseOffPickerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Set the OFF duration'**
+  String get phaseOffPickerTitle;
+
+  /// No description provided for @plusMinute.
+  ///
+  /// In en, this message translates to:
+  /// **'+'**
+  String get plusMinute;
+
+  /// No description provided for @minusMinute.
+  ///
+  /// In en, this message translates to:
+  /// **'−'**
+  String get minusMinute;
+
+  /// No description provided for @chainSortNote.
+  ///
+  /// In en, this message translates to:
+  /// **'The chain is sorted automatically by execution time — sunrise commands first, then the fixed-time commands from 00:00, then the sunset commands. Every new command takes its time-based position on its own.'**
+  String get chainSortNote;
+
+  /// No description provided for @astroToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Today: {t}'**
+  String astroToday(String t);
+
+  /// No description provided for @overlapTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Annual coincidence notice'**
+  String get overlapTitle;
+
+  /// No description provided for @overlapDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'The fixed command {time} coincides with the {base} command on {days} days of the year (from {from} to {to}).'**
+  String overlapDetail(
+      String time, String base, String days, String from, String to);
+
+  /// No description provided for @overlapNote.
+  ///
+  /// In en, this message translates to:
+  /// **'This is normal: sunrise and sunset move through the year. The device runs the commands in chain order; at the shared instant the later chain entry wins. You can keep or adjust the times.'**
+  String get overlapNote;
+
+  /// No description provided for @overlapAccept.
+  ///
+  /// In en, this message translates to:
+  /// **'Save anyway'**
+  String get overlapAccept;
+
+  /// No description provided for @gateNfcOffTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'NFC is off'**
+  String get gateNfcOffTitle;
+
+  /// No description provided for @gateNfcOffText.
+  ///
+  /// In en, this message translates to:
+  /// **'The NFC adapter of your phone is off. The app needs NFC to identify the relay and transfer programs. Please turn NFC on.'**
+  String get gateNfcOffText;
+
+  /// No description provided for @gateNfcMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'This phone has no NFC hardware — the relay cannot be reached from this device.'**
+  String get gateNfcMissing;
+
+  /// No description provided for @gateLocAsked.
+  ///
+  /// In en, this message translates to:
+  /// **'Location permission requested — it is used only to find the sunrise and sunset times.'**
+  String get gateLocAsked;
+
+  /// No description provided for @gateLocPermTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Location permission needed'**
+  String get gateLocPermTitle;
+
+  /// No description provided for @gateLocPermText.
+  ///
+  /// In en, this message translates to:
+  /// **'The app needs the location permission to compute the sunrise and sunset times of your area. Please grant the permission in the app settings.'**
+  String get gateLocPermText;
+
+  /// No description provided for @gateLocServiceTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Location service is off'**
+  String get gateLocServiceTitle;
+
+  /// No description provided for @gateLocServiceText.
+  ///
+  /// In en, this message translates to:
+  /// **'The phone\'s location service is off. Turn it on so the app can find your position for the sunrise/sunset calculation.'**
+  String get gateLocServiceText;
+
+  /// No description provided for @gateGoSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Open settings'**
+  String get gateGoSettings;
+
+  /// No description provided for @gateLater.
+  ///
+  /// In en, this message translates to:
+  /// **'Later'**
+  String get gateLater;
+
+  /// No description provided for @gateStripHint.
+  ///
+  /// In en, this message translates to:
+  /// **'NFC or location is not ready — some features cannot work until it is fixed.'**
+  String get gateStripHint;
+
+  /// No description provided for @gpsMapTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick the position on the map'**
+  String get gpsMapTitle;
+
+  /// No description provided for @gpsMapHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap anywhere on the map to move the marker, then confirm.'**
+  String get gpsMapHint;
+
+  /// No description provided for @gpsPhonePos.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone position'**
+  String get gpsPhonePos;
 }
 
 class _AppLocalizationsDelegate

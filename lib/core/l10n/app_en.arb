@@ -269,7 +269,7 @@
   "gpsUpdated": "Last update",
   "gpsRefresh": "Update location",
   "gpsUpdatedToast": "Location saved.",
-  "gpsUse": "How it is used: the app fits Chebyshev coefficients over a year of sunrise/sunset samples at this location — 24 sixteen-bit Q14 values written to blocks 416–427. The MCU evaluates them daily in fixed point.",
+  "gpsUse": "This location is the reference for the device's sunrise and sunset calculation. It is stored only on your phone and on the device — it is never shared with any other service.",
   "gpsAccuracy": "Accuracy ±15 m",
   "gpsPin": "Current location",
   "nameDialogTitle": "New program",
@@ -927,5 +927,61 @@
       }
     }
   },
-  "idFailNfcOff": "The phone NFC adapter is not enabled. Turn NFC on from the quick settings and try again."
+  "idFailNfcOff": "The phone NFC adapter is not enabled. Turn NFC on from the quick settings and try again.",
+  "evFixedTimeLabel": "Run time",
+  "evFixedPickerTitle": "Set the run time",
+  "offsetPickerTitle": "Set the offset from sunrise/sunset",
+  "offsetHint": "Offset from the astronomical base, 0 to 60 minutes in 5-minute steps.",
+  "phaseOnLabel": "ON duration",
+  "phaseOffLabel": "OFF duration",
+  "phaseOnPickerTitle": "Set the ON duration",
+  "phaseOffPickerTitle": "Set the OFF duration",
+  "plusMinute": "+",
+  "minusMinute": "−",
+  "chainSortNote": "The chain is sorted automatically by execution time — sunrise commands first, then the fixed-time commands from 00:00, then the sunset commands. Every new command takes its time-based position on its own.",
+  "astroToday": "Today: {t}",
+  "@astroToday": {
+    "placeholders": {
+      "t": {
+        "type": "String"
+      }
+    }
+  },
+  "overlapTitle": "Annual coincidence notice",
+  "overlapDetail": "The fixed command {time} coincides with the {base} command on {days} days of the year (from {from} to {to}).",
+  "@overlapDetail": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "base": {
+        "type": "String"
+      },
+      "days": {
+        "type": "String"
+      },
+      "from": {
+        "type": "String"
+      },
+      "to": {
+        "type": "String"
+      }
+    }
+  },
+  "overlapNote": "This is normal: sunrise and sunset move through the year. The device runs the commands in chain order; at the shared instant the later chain entry wins. You can keep or adjust the times.",
+  "overlapAccept": "Save anyway",
+  "gateNfcOffTitle": "NFC is off",
+  "gateNfcOffText": "The NFC adapter of your phone is off. The app needs NFC to identify the relay and transfer programs. Please turn NFC on.",
+  "gateNfcMissing": "This phone has no NFC hardware — the relay cannot be reached from this device.",
+  "gateLocAsked": "Location permission requested — it is used only to find the sunrise and sunset times.",
+  "gateLocPermTitle": "Location permission needed",
+  "gateLocPermText": "The app needs the location permission to compute the sunrise and sunset times of your area. Please grant the permission in the app settings.",
+  "gateLocServiceTitle": "Location service is off",
+  "gateLocServiceText": "The phone's location service is off. Turn it on so the app can find your position for the sunrise/sunset calculation.",
+  "gateGoSettings": "Open settings",
+  "gateLater": "Later",
+  "gateStripHint": "NFC or location is not ready — some features cannot work until it is fixed.",
+  "gpsMapTitle": "Pick the position on the map",
+  "gpsMapHint": "Tap anywhere on the map to move the marker, then confirm.",
+  "gpsPhonePos": "Phone position"
 }

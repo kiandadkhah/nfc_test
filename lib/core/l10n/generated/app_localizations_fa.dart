@@ -539,7 +539,7 @@ class AppLocalizationsFa extends AppLocalizations {
 
   @override
   String get gpsUse =>
-      'کاربرد موقعیت: اپ با برازش چبیشف روی نمونه‌های سالانه طلوع/غروب، ۲۴ ضریب ۱۶ بیتی Q14 می‌سازد و در بلوک ۴۱۶ تا ۴۲۷ می‌نویسد. MCU روزانه با ارزیابی نقطه‌ثابت زمان طلوع و غروب را محاسبه می‌کند.';
+      'این موقعیت، مبنای محاسبه زمان طلوع و غروب خورشید در دستگاه است. این اطلاعات تنها روی گوشی شما و دستگاه ذخیره می‌شود و با هیچ سرویس دیگری به اشتراک گذاشته نمی‌شود.';
 
   @override
   String get gpsAccuracy => 'دقت ±۱۵ متر';
@@ -1538,4 +1538,109 @@ class AppLocalizationsFa extends AppLocalizations {
   @override
   String get idFailNfcOff =>
       'دسترسی NFC گوشی فعال نیست. NFC را از تنظیمات سریع گوشی روشن کنید و دوباره تلاش کنید.';
+
+  @override
+  String get evFixedTimeLabel => 'زمان اجرا';
+
+  @override
+  String get evFixedPickerTitle => 'تنظیم زمان اجرا';
+
+  @override
+  String get offsetPickerTitle => 'تنظیم انحراف از طلوع/غروب';
+
+  @override
+  String get offsetHint =>
+      'فاصله از زمان پایه نجومی، از ۰ تا ۶۰ دقیقه با گام ۵ دقیقه.';
+
+  @override
+  String get phaseOnLabel => 'مدت روشن بودن';
+
+  @override
+  String get phaseOffLabel => 'مدت خاموش بودن';
+
+  @override
+  String get phaseOnPickerTitle => 'تنظیم مدت روشن بودن';
+
+  @override
+  String get phaseOffPickerTitle => 'تنظیم مدت خاموش بودن';
+
+  @override
+  String get plusMinute => '+';
+
+  @override
+  String get minusMinute => '−';
+
+  @override
+  String get chainSortNote =>
+      'زنجیره به‌صورت خودکار بر اساس زمان اجرا مرتب می‌شود — ابتدا دستورهای طلوع، سپس دستورهای ساعت‌مشخص از ۰۰:۰۰ و در پایان دستورهای غروب. هر دستور جدید در جایگاه زمانی خودش قرار می‌گیرد.';
+
+  @override
+  String astroToday(String t) {
+    return 'امروز: $t';
+  }
+
+  @override
+  String get overlapTitle => 'هم‌زمانی در طول سال';
+
+  @override
+  String overlapDetail(
+      String time, String base, String days, String from, String to) {
+    return 'دستور ساعت‌مشخص $time در $days روز از سال با دستور $base هم‌زمان می‌شود (از $from تا $to).';
+  }
+
+  @override
+  String get overlapNote =>
+      'این حالت طبیعی است: زمان طلوع و غروب در طول سال جابه‌جا می‌شود. دستگاه دستورها را به ترتیب زنجیره اجرا می‌کند و در لحظه هم‌زمانی، فرمان بعدی غلبه می‌کند. می‌توانید زمان‌ها را نگه دارید یا اصلاح کنید.';
+
+  @override
+  String get overlapAccept => 'ذخیره به همان شکل';
+
+  @override
+  String get gateNfcOffTitle => 'NFC خاموش است';
+
+  @override
+  String get gateNfcOffText =>
+      'حافظه NFC گوشی شما خاموش است. اپ برای شناسایی رله و انتقال برنامه‌ها به NFC نیاز دارد؛ لطفاً NFC را روشن کنید.';
+
+  @override
+  String get gateNfcMissing =>
+      'این گوشی سخت‌افزار NFC ندارد — از این دستگاه نمی‌توان به رله متصل شد.';
+
+  @override
+  String get gateLocAsked =>
+      'مجوز موقعیت مکانی درخواست شد — تنها برای محاسبه زمان طلوع و غروب خورشید استفاده می‌شود.';
+
+  @override
+  String get gateLocPermTitle => 'مجوز موقعیت مکانی لازم است';
+
+  @override
+  String get gateLocPermText =>
+      'اپ برای محاسبه زمان طلوع و غروب منطقه شما به مجوز موقعیت مکانی نیاز دارد. لطفاً این مجوز را در تنظیمات برنامه صادر کنید.';
+
+  @override
+  String get gateLocServiceTitle => 'سرویس موقعیت مکانی خاموش است';
+
+  @override
+  String get gateLocServiceText =>
+      'سرویس موقعیت مکانی گوشی خاموش است. برای تعیین موقعیت و محاسبه زمان طلوع و غروب، آن را روشن کنید.';
+
+  @override
+  String get gateGoSettings => 'رفتن به تنظیمات';
+
+  @override
+  String get gateLater => 'بعداً';
+
+  @override
+  String get gateStripHint =>
+      'NFC یا موقعیت مکانی آماده نیست — تا رفع آن برخی امکانات کار نمی‌کنند.';
+
+  @override
+  String get gpsMapTitle => 'انتخاب موقعیت روی نقشه';
+
+  @override
+  String get gpsMapHint =>
+      'روی نقشه لمس کنید تا نشانگر جابه‌جا شود، سپس تایید کنید.';
+
+  @override
+  String get gpsPhonePos => 'موقعیت فعلی گوشی';
 }

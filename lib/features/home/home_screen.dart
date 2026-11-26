@@ -7,9 +7,11 @@ import '../../core/constants/domain.dart';
 import '../../core/models/program.dart';
 import '../../core/nfc/nfc_service.dart';
 import '../../core/nfc/tag_link.dart';
+import '../../core/platform/system_gate.dart';
 import '../../core/state/app_providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
+import '../../core/widgets/app_toasts.dart';
 import '../../core/widgets/kianex_shapes.dart';
 import '../../core/widgets/nfc_hex_button.dart';
 import '../../state/programs_provider.dart';
@@ -27,6 +29,22 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _gateRan = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // v4.1 startup gate — permissions & hardware prompts run once per app
+    // session, right after the first frame so the localization context is
+    // ready.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (_gateRan || !mounted) return;
+      _gateRan = true;
+      await runStartupGate(context);
+      if (mounted) setState(() {}); // refresh the readiness strip
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = L(context);
@@ -40,6 +58,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             color: AppTheme.slate900,
             child: SafeArea(bottom: false, child: _header(l)),
           ),
+          // v4.1 — NFC / location readiness strip (hidden when all good).
+          const SystemStatusStrip(),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: _chartsRow(context, l, fa, programs),
@@ -605,16 +625,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 Navigator.of(sheetContext).pop();
                 final programs = ref.read(programsProvider);
                 if (programs.programs.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(L(context).noProgramsToast)),
-                  );
+                  showAppMessage(context, L(context).noProgramsToast, isError: true);
                   return;
                 }
                 // Q-05: a disabled program is never sent to the relay.
                 if (programs.enabledPrograms.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(L(context).allDisabledToast)),
-                  );
+                  showAppMessage(context, L(context).allDisabledToast, isError: true);
                   return;
                 }
                 context.push('/write?mode=program');
@@ -799,9 +815,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final programs = ref.read(programsProvider);
     programs.toggleEnabled(index);
     final nowEnabled = programs.programs[index].enabled;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(nowEnabled ? l.progOnToast : l.progOffToast)),
-    );
+    showAppMessage(context, nowEnabled ? l.progOnToast : l.progOffToast);
   }
 
   Future<void> _startNewProgram(BuildContext context) async {
@@ -880,9 +894,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       final idx = ref.read(programsProvider).programs.indexOf(p);
       ref.read(programsProvider).deleteAt(idx);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l.programDeleted(p.name))),
-        );
+        showAppMessage(context, l.programDeleted(p.name));
       }
     }
   }

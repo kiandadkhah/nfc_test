@@ -8,6 +8,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
 import '../../core/utils/jalali.dart';
 import '../../state/providers.dart';
+import '../../core/widgets/app_toasts.dart';
 
 /// Day assignment — weekly / monthly / annual grids, each followed by the
 /// «selected days» list (per-day remove), per the approved v2.2 design.
@@ -284,9 +285,7 @@ class AssignScreen extends ConsumerWidget {
               child: FilledButton.icon(
                 onPressed: () {
                   context.pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(l.asSaved)),
-                  );
+                  showAppMessage(context, l.asSaved);
                 },
                 icon: const Icon(Icons.check),
                 label: Text(l.asOk),
@@ -318,7 +317,7 @@ class AssignScreen extends ConsumerWidget {
       case CycleType.daily:
         break;
     }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l.asRemovedOne)));
+    showAppMessage(context, l.asRemovedOne);
   }
 
   Widget _dayCell(BuildContext context,

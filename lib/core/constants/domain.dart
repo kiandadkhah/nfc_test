@@ -58,3 +58,20 @@ abstract final class DomainLimits {
   /// CRC-32/MPEG-2 test vectors from SOT table 4-8. [TV-01..TV-03]
   static const List<int> crcTestVectorValues = [0x0376E6E7, 0xA97AFF4D, 0x6B6DC92A];
 }
+
+/// Factory NDEF contract of the onboarding area (A1, blocks 1–15).
+/// The tag carries a single well-known URI record pointing at the product
+/// page; the app reads it for identification and never rewrites it.
+/// [SOT §3.2 ناحیه آنبوردینگ, OI-05 — factory URL confirmed by KIANEX]
+abstract final class NdefContract {
+  /// Exact product URL written by the factory (URI identifier code 0x04).
+  static const String productUrl = 'https://kianex.co/products/pts50r1';
+
+  /// Accepted URI prefix for tag identification — covers the PTS50 family
+  /// product pages (pts50r1, pts50n1) on the factory domain.
+  static const String productUrlPrefix = 'https://kianex.co/products/pts50';
+
+  /// True when the decoded NDEF URI identifies a KIANEX PTS50 product tag.
+  static bool uriMatchesProduct(String uri) =>
+      uri.trim().toLowerCase().startsWith(productUrlPrefix);
+}

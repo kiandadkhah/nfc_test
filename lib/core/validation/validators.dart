@@ -1,10 +1,12 @@
 /// Pure validation logic — Q-06 field ranges, Q-10 same-minute conflicts and
 /// the four command-chain rules R-01..R-04 (user-defined, formal wording in
-/// the l10n deck). No Flutter imports: fully unit-testable. [§7.3]
+/// the l10n deck), plus the v4.1 chain-sorting strategy and the annual
+/// fixed↔solar overlap analysis. No Flutter imports: fully unit-testable. [§7.3]
 library;
 
 import '../constants/domain.dart';
 import '../models/program.dart';
+import '../solar/solar_events.dart';
 
 class ConflictPair {
   const ConflictPair(this.firstIndex, this.secondIndex, this.minute);
@@ -51,6 +53,50 @@ class ChainViolation {
 
   @override
   int get hashCode => Object.hash(rule, a, b, minute, gap);
+}
+
+// =====================================================================
+// v4.1 chain sorting strategy
+//
+// Solar command times (sunrise / sunset) drift through the year, so they
+// cannot be interleaved with fixed times by a static minute-of-day key.
+// The deterministic, year-stable order groups the chain as:
+//   1. sunrise-anchored commands (sorted by effective offset),
+//   2. fixed-time commands (sorted by minute of day from 00:00),
+//   3. sunset-anchored commands (sorted by effective offset).
+// The same order is used by the UI, the validators and the device payload
+// (see buildProgramWritePlan) — one order everywhere.
+// =====================================================================
+
+/// Execution group of an event: 0 = sunrise, 1 = fixed, 2 = sunset.
+int chainGroupOf(Event ev) => ev.type == EventType.astro
+    ? (ev.astro == SolarBase.sunrise ? 0 : 2)
+    : 1;
+
+/// In-group sort key: fixed → minute of day; solar → effective offset
+/// («قبل از» sorts before the base, i.e. negative).
+int chainSortKeyOf(Event ev) => ev.type == EventType.fixed
+    ? ev.fixedMinute!
+    : (ev.offsetDirection == OffsetDirection.before
+        ? -ev.offsetMinutes
+        : ev.offsetMinutes);
+
+/// Stable sorted copy of a chain — group, then sort key, then the original
+/// insertion order for ties. The list is re-sorted automatically on every
+/// add / edit / delete, so the displayed and executed order is always
+/// time-based. [v4.1 user report: «لیست با هر دستور جدید مرتب شود»]
+List<Event> sortChain(List<Event> events) {
+  final indexed = <(int, Event)>[
+    for (var i = 0; i < events.length; i++) (i, events[i]),
+  ];
+  indexed.sort((x, y) {
+    final g = chainGroupOf(x.$2).compareTo(chainGroupOf(y.$2));
+    if (g != 0) return g;
+    final k = chainSortKeyOf(x.$2).compareTo(chainSortKeyOf(y.$2));
+    if (k != 0) return k;
+    return x.$1.compareTo(y.$1);
+  });
+  return [for (final e in indexed) e.$2];
 }
 
 /// Q-06: timer phase must be 5..720 minutes, multiple of 5.
@@ -152,6 +198,29 @@ List<ChainViolation> chainRuleViolations(List<Event> events) {
       }
     }
 
+    if (a.type == EventType.astro && b.type == EventType.astro) {
+      // Same base → their offset keys order the real minutes; a small
+      // offset distance is a R-02 violation. Different bases (sunrise↔
+      // sunset) are always hours apart — nothing to check statically.
+      if (a.astro == b.astro) {
+        final gap = (chainSortKeyOf(b) - chainSortKeyOf(a)).abs();
+        if (gap == 0) continue; // already reported as R-01
+        if (gap < DomainLimits.minGapMinutes) {
+          push(ChainRule.minGap, i, i + 1, gap: gap);
+        }
+      }
+      continue; // [v4.1] R-03 is exempt for solar commands — their real
+      // time moves through the year, so a static same-action adjacency
+      // cannot be a device error (user-approved separation from R-3).
+    }
+
+    if (a.type == EventType.astro || b.type == EventType.astro) {
+      // Fixed↔solar adjacency — not statically decidable (the solar time
+      // sweeps across the year). The annual overlap analysis below
+      // reports the exact coinciding date range instead.
+      continue;
+    }
+
     if (a.cmd == RelayCommand.timer && b.cmd == RelayCommand.timer) {
       if (timerKeyOf(a) == timerKeyOf(b)) push(ChainRule.sameTimer, i, i + 1);
       continue; // a timer has no static relay state — R-03 does not apply
@@ -163,27 +232,140 @@ List<ChainViolation> chainRuleViolations(List<Event> events) {
   return out;
 }
 
-/// Violations introduced by placing [candidate] into [list].
-///
-/// When editing ([skipIndex] ≥ 0) the candidate replaces that position;
-/// otherwise it is appended at the end — exactly the position the user sees.
-List<ChainViolation> violationsWithCandidate(
+// =====================================================================
+// v4.1 annual fixed↔solar overlap analysis
+// =====================================================================
+
+/// One annual coincidence: the fixed command fires in the same minute as
+/// the solar command on [days] days of the year, between [firstDate] and
+/// [lastDate]. Indices refer to the SORTED chain.
+class AstroOverlap {
+  const AstroOverlap({
+    required this.fixedIndex,
+    required this.astroIndex,
+    required this.days,
+    required this.firstDate,
+    required this.lastDate,
+  });
+
+  final int fixedIndex;
+  final int astroIndex;
+  final int days;
+  final DateTime firstDate;
+  final DateTime lastDate;
+}
+
+/// Finds the fixed-time commands that coincide with a solar command on
+/// specific days of the year. Sunrise/sunset sweep a minute range across
+/// the year, so a fixed command inside that range collides with the solar
+/// command on the days the sweep crosses its exact minute — the strategy
+/// chosen for «یک دستور با ساعت مشخص در برخی روزهای سال با طلوع/غروب
+/// همپوشانی دارد». The result is advisory (non-blocking): the chain order
+/// decides which command wins at the shared instant.
+/// [events] must be the sorted chain (sortChain), so the indices match the
+/// displayed order. Pure Dart — uses the same NOAA model as the payload.
+List<AstroOverlap> astroOverlapWarnings(
+  List<Event> events, {
+  required double latitude,
+  required double longitude,
+  required double utcOffsetHours,
+  DateTime? now,
+}) {
+  final ref = now ?? DateTime.now();
+  final year = ref.year;
+  final daysInYear =
+      (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 ? 366 : 365;
+  final jan1 = DateTime(year, 1, 1);
+  final sunrise = List<int>.filled(daysInYear, 0);
+  final sunset = List<int>.filled(daysInYear, 0);
+  for (var d = 0; d < daysInYear; d++) {
+    final date = jan1.add(Duration(days: d));
+    final t = solarTimesFor(
+      year: date.year,
+      month: date.month,
+      day: date.day,
+      latitude: latitude,
+      longitude: longitude,
+      utcOffsetHours: utcOffsetHours,
+    );
+    sunrise[d] = t.sunriseMinutes;
+    sunset[d] = t.sunsetMinutes;
+  }
+
+  final out = <AstroOverlap>[];
+  for (var ai = 0; ai < events.length; ai++) {
+    final astro = events[ai];
+    if (astro.type != EventType.astro) continue;
+    final base = astro.astro == SolarBase.sunrise ? sunrise : sunset;
+    final sign = astro.offsetDirection == OffsetDirection.before ? -1 : 1;
+    for (var fi = 0; fi < events.length; fi++) {
+      final fixedEv = events[fi];
+      if (fixedEv.type != EventType.fixed) continue;
+      if (fixedEv.cmd == RelayCommand.timer) continue; // timers have no instant
+      final target = fixedEv.fixedMinute!;
+      var first = -1;
+      var last = -1;
+      var count = 0;
+      for (var d = 0; d < daysInYear; d++) {
+        final eff = (base[d] + sign * astro.offsetMinutes) % 1440;
+        if (eff == target) {
+          count += 1;
+          if (first < 0) first = d;
+          last = d;
+        }
+      }
+      if (count > 0) {
+        out.add(AstroOverlap(
+          fixedIndex: fi,
+          astroIndex: ai,
+          days: count,
+          firstDate: jan1.add(Duration(days: first)),
+          lastDate: jan1.add(Duration(days: last)),
+        ));
+      }
+    }
+  }
+  return out;
+}
+
+/// Result of checking one candidate event against a chain.
+class CandidateCheckResult {
+  const CandidateCheckResult({required this.position, required this.violations});
+
+  /// Position of the candidate in the SORTED chain — the position the UI
+  /// displays after the automatic re-sort.
+  final int position;
+  final List<ChainViolation> violations;
+}
+
+/// Violations introduced by placing [candidate] into [list], evaluated on
+/// the SORTED chain — the candidate is checked in the exact position it
+/// will occupy after the automatic re-sort, so adjacency is only evaluated
+/// against its real neighbours. When editing ([skipIndex] ≥ 0) the
+/// candidate replaces that entry.
+CandidateCheckResult candidateCheck(
   Event candidate,
   List<Event> list, {
   int skipIndex = -1,
 }) {
-  final merged = <Event>[];
-  final insertAt = skipIndex >= 0 && skipIndex < list.length ? skipIndex : list.length;
-  for (var i = 0; i < list.length; i++) {
-    if (i == insertAt) {
-      merged.add(candidate);
-    }
-    if (i != skipIndex) merged.add(list[i]);
+  final without = <Event>[
+    for (var i = 0; i < list.length; i++)
+      if (i != skipIndex) list[i],
+  ];
+  final merged = [...without, candidate];
+  final sorted = sortChain(merged);
+  var pos = sorted.indexWhere((e) => identical(e, candidate));
+  if (pos < 0) {
+    // Defensive fallback — the sort keeps references, so this is not
+    // expected; match structurally if a copy ever slips through.
+    final key = candidate.toJson().toString();
+    pos = sorted.indexWhere((e) => e.toJson().toString() == key);
   }
-  if (insertAt >= list.length || list.isEmpty) merged.add(candidate);
-  final pos = insertAt >= merged.length ? merged.length - 1 : insertAt;
-  final all = chainRuleViolations(merged);
-  return all.where((v) => v.a == pos || v.b == pos).toList();
+  final all = chainRuleViolations(sorted);
+  return CandidateCheckResult(
+    position: pos < 0 ? sorted.length - 1 : pos,
+    violations: all.where((v) => v.a == pos || v.b == pos).toList(),
+  );
 }
 
 /// Total events across all programs (each chain step occupies one pool slot).

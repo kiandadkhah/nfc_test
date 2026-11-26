@@ -28,10 +28,12 @@ Event _fixed(int hh, int mm, {RelayCommand cmd = RelayCommand.on}) => Event(
     );
 
 /// Seeds the onboarding area of [link] with a valid Type 5 CC file and the
-/// factory NDEF URI pointing at the KIANEX product page.
+/// factory NDEF URI pointing at the KIANEX product page (the URI payload
+/// carries the URL WITHOUT the https:// prefix — prefix code 0x04 provides
+/// it, exactly like the factory write).
 void seedOnboarding(FakeTagLink link) {
   link.seedBlock(0, [0xE1, 0x40, 0x00, 0x00]); // CC: Type 5 v1.0
-  final uri = 'https://kianex.example/pst50r1'.codeUnits;
+  final uri = NdefContract.productUrl.substring('https://'.length).codeUnits;
   final message = <int>[0xD1, 0x01, uri.length + 1, 0x55, 0x04, ...uri];
   final tlv = <int>[0x03, message.length, ...message, 0xFE];
   while (tlv.length < 60) {

@@ -108,18 +108,30 @@ class ProgramsController extends ChangeNotifier {
 
   void addDraftEvent(Event e) {
     _draft?.events.add(e);
+    _sortDraftEvents();
     notifyListeners();
   }
 
   void replaceDraftEvent(int index, Event e) {
     if (_draft == null) return;
     _draft!.events[index] = e;
+    _sortDraftEvents();
     notifyListeners();
   }
 
   void removeDraftEvent(int index) {
     _draft?.events.removeAt(index);
     notifyListeners();
+  }
+
+  /// [v4.1] The chain is always kept in time order (sunrise group → fixed
+  /// times → sunset group) — every add/edit re-sorts it, so the list the
+  /// user sees, the numbering and the device payload stay in sync.
+  void _sortDraftEvents() {
+    if (_draft == null || _draft!.events.length < 2) return;
+    _draft!.events
+      ..clear()
+      ..addAll(sortChain(_draft!.events));
   }
 
   void toggleWeekly(int day) => _toggle(_draft?.assign.weekly, day);
@@ -234,6 +246,8 @@ class ProgramsController extends ChangeNotifier {
   }
 
   /// Loads the locally persisted list (silently skips corrupt payloads).
+  /// Events of every program are re-sorted so chains created by older app
+  /// versions also follow the v4.1 time order.
   void restoreFromLocalJson(String? raw) {
     if (raw == null || raw.isEmpty) return;
     try {
@@ -241,6 +255,11 @@ class ProgramsController extends ChangeNotifier {
       _programs
         ..clear()
         ..addAll(data.map(Program.fromJson));
+      for (final p in _programs) {
+        p.events
+          ..clear()
+          ..addAll(sortChain(p.events));
+      }
       _nextId = _programs.fold<int>(1, (m, p) => p.id >= m ? p.id + 1 : m);
     } catch (_) {
       // Corrupt payload — start fresh instead of crashing.
