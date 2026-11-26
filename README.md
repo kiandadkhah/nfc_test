@@ -162,3 +162,5 @@ and fast.
 * Q-05 — disabled programs are never part of the payload.
 * Q-10 + R-01..R-04 — chain rules enforced in the editor.
 * RC-10 — two failed attempts lead to the power-off guidance dialog.
+#   n f c _ t e s t  
+ 
