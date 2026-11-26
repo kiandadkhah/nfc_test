@@ -1,0 +1,21 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+  language:
+    strict-casts: true
+    strict-inference: true
+  errors:
+    # Flutter 3.47+ deprecates `package:flutter/material.dart` in favour of
+    # `package:material_ui` — the classic import stays supported on every
+    # stable channel this project targets, so the notice is silenced.
+    deprecated_member_use: ignore
+
+linter:
+  rules:
+    - prefer_const_constructors
+    - prefer_final_locals
+    - always_declare_return_types

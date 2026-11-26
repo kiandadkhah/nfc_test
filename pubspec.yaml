@@ -1,0 +1,50 @@
+name: kianex_pts50n1_app
+description: KIANEX PTS50N1 companion app — Phase 2 (real ST25DV16KC NFC layer, Material 3, Riverpod, go_router, application logger).
+publish_to: 'none'
+version: 4.0.1+41
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: any
+  flutter_riverpod: ^2.5.1
+  go_router: ^14.2.0
+  shared_preferences: ^2.2.3
+  # Real NFC transport (ISO 15693 raw commands for the ST25DV16KC shared memory).
+  flutter_nfc_kit: ^3.7.0
+  # Renders the official KIANEX brand mark (LOGO_SVG.svg) as an asset.
+  flutter_svg: ^2.5.0
+  # Real GPS position of the relay — basis of the solar coefficients.
+  geolocator: ^14.1.2
+  # Application logger persistence + log export for the test reports.
+  path_provider: ^2.1.6
+  share_plus: ^13.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  generate: true
+
+  assets:
+    - assets/images/logo.svg
+
+  fonts:
+    - family: Vazirmatn
+      fonts:
+        - asset: assets/fonts/Vazirmatn-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Vazirmatn-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Vazirmatn-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Vazirmatn-Bold.ttf
+          weight: 700

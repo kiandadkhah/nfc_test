@@ -1,0 +1,25 @@
+# Codemagic build configuration — KIANEX PTS50N1 (Flutter, Android APK)
+# Docs: https://docs.codemagic.io/yaml-basic-example/
+workflows:
+  android-apk:
+    name: KIANEX PTS50N1 — Android APK
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      java: 17
+    scripts:
+      - name: Get dependencies
+        script: flutter packages pub get
+      - name: Run unit tests
+        script: flutter test
+      - name: Build release APK
+        script: flutter build apk --release
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk
+    publishing:
+      email:
+        recipients:
+          - app-manager@kianex.ir
+        notify:
+          success: true
+          failure: true
