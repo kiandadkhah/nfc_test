@@ -103,13 +103,10 @@ class _ToastViewState extends State<_ToastView>
               decoration: BoxDecoration(
                 color: color,
                 borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.22),
-                    blurRadius: 14,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+                // v4.3 — the drop shadow rendered as a hard dark line
+                // under the banner on some panels («زیر خط پیغام‌ها را
+                // حذف کن»); the flat banner with the white text keeps all
+                // the contrast and no artifact line remains.
               ),
               child: Row(
                 children: [

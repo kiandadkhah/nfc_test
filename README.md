@@ -1,4 +1,4 @@
-# KIANEX PTS50N1 — Companion Application (v4.2.0)
+# KIANEX PTS50N1 — Companion Application (v4.3.0)
 
 Flutter companion app for the **KIANEX PTS50N1 / PST50R1** programmable
 single-relay timer. The app plans timer programs, validates the command
@@ -8,6 +8,33 @@ defined in `PST50R1_SourceOfTruth` (SOT v3.1-Final).
 
 > Android only. iOS was removed from the delivery scope («فقط app برای
 > اندروید ساخته می‌شود»).
+
+## What is new in v4.3.0 (field-report release: exclusive NFC, write
+verification, Iranian map, exact-link identification, program rules)
+
+Based on the v4.2.0 field test (APK installed from Actions, tag memory
+dumped independently after the transfer). The decisive evidence: the
+**APP_CRC32 stored on the tag was `0x0993D8D7` — mathematically exactly
+the CRC of an all-zero payload** (CRC-32/MPEG-2 over 1656 zero bytes),
+so the pools were empty because the payload writes never committed, and
+the old verification (CRC over read-back vs stored) validated that
+failure as success.
+
+| # | Field report | Root cause | Fix in v4.3.0 |
+|---|--------------|------------|---------------|
+| 1 | «اپ هنوز دسترسی انحصاری به NFC در موقع اجرا را ندارد… اندروید هنوز در پشت زمینه صفحه وب در NDEF را باز می کند» — the browser opened right after the identify step and again after «انتقال انجام شد» | Every `FlutterNfcKit.finish()` released the adapter; the still-present tag was re-dispatched to the system → browser. The v4.2 manifest filter only helps when the system dispatch actually runs | **flutter_nfc_kit removed entirely.** A native layer (`MainActivity.kt`, channel `kianex/nfc`) holds the adapter in **reader mode with `SKIP_NDEF_CHECK` for the whole foreground lifetime** (`onResume` → `onPause`): no NDEF intent is ever produced while the app is running, so no browser can open — between steps, between sessions or after completion. poll/transceive/finish keep the exact previous semantics (raw ISO 15693 frames, response CRC stripped by the link, UID byte order unchanged) |
+| 2 | Tag memory after transfer: `Process_Record_Planning=0x3C`, `Program_Counter=1`, `APP_CRC32=0x0993D8D7` = CRC of zeros — weekly/monthly/yearly cycles, event pool, timer pool, Chebyshev coefficients and clock/date ALL zero, although the app showed all 8 steps green and «انتقال انجام شد» | The 416-block write burst of step 4 returned RF success but the EEPROM never committed; step 5 computed APP_CRC32 **over the read-back content** (zeros) and step 7 compared CRC-vs-CRC — the check was tautological, it could never detect a lost write | **Verified writes** (`sot_protocol.dart`): step 4 now writes in 8-block chunks, **reads each chunk back and compares byte-exactly**, rewrites stale blocks up to twice (with 4 ms EEPROM breathing room per block), and fails honestly with `write_verify_failed:<block>` if a block still refuses. Plus a step-7 **sentinel**: a program-mode CRC equal to the all-zero payload CRC (`payload_not_written`) is rejected. `flutter build` cannot mask this anymore — and the log names the first failing block |
+| 3 | The identification accepted a tampered link: changing the tag URL to `…/products/pts50r15` still printed «دستگاه شناسایی شد» | The acceptance check was a **prefix match** (`startsWith("https://kianex.co/products/pts50")`), so `pts50r15` matched `pts50r…` | **Exact whitelist** (`NdefContract.productModels`): only `https://kianex.co/products/pts50r1` → PTS50R1 (supported) and `https://kianex.co/products/pts50r15` → PTS50R15 (explicit «model not supported» message) pass identification; ANY other URI fails with «لینک تگ معتبر نیست». Protocol step 1 enforces the same rule (new codes `link_invalid` / `model_unsupported`) |
+| 4 | «برای تطابق مدل تگ و شناسه UID و حافظه تگ بررسی شود» | The UID and memory signature were only informational | Identification now checks the **three device signatures**: ① exact whitelisted link → model, ② **UID prefix `E0 02 26`** (ISO 15693 fixed E0 + ST vendor 02 + ST25DV16K/64K IC_REF 26 — matches the real tag `E0 02 26 00 D7 AD 24 AF`), ③ memory geometry ≥ 433 blocks. The identity sheet shows all rows (including «مدل استخراج‌شده از لینک») and the write protocol blocks a UID-signature mismatch (`uid_signature`) |
+| 5 | «نقشه لود نمی شود… سرعت لود پایین… مکان نما در مشهد ولی تصویر اصفهان… دریافت موقعیت با GPS مختصات فعلی را نمایش نمی دهند» + «پیشنهاد می شود از سرویس های ایرانی استفاده شود» | ① OSM tiles crawl inside Iran; ② the map camera was built once from `initialCenter` — a fresh GPS fix moved the marker but never the camera, so marker and tiles showed different cities; ③ the picker's «موقعیت فعلی گوشی» button only jumped back to the stale opening point, it never read GPS | **map.ir tiles** (`lib/core/map/map_tiles.dart`, `https://map.ir/shiveh/{z}/{x}/{y}.png` + `x-api-key` header, key via `--dart-define=MAP_IR_API_KEY`, automatic OpenStreetMap fallback when the key is absent or the service is unreachable); the **camera now follows the marker** on every location change (GPS fix or picked point); the picker's GPS button **really fetches the current position** (permission + service checks) and re-centers camera + marker |
+| 6 | Logical report: two weekly programs assigned to the same weekdays create two chains for one day slot — «از لحاظ منطقی و معماری حافظه این امکان‌پذیر نیست» | Nothing validated program-level day overlaps (the chain rules R-01..R-04 only looked INSIDE one chain) | **Program rules P-01..P-05** (`validators.dart`): P-01 one daily program max (single daily slot), P-02/P-03/P-04 weekly/monthly/annual programs must not share any day slot, P-05 (advisory) a daily program coexisting with other cycles never runs on their days (C-05 priority). Blocking violations stop the save; the save button stays tappable and opens the formal popup with «متوجه شدم» |
+| 7 | «پیغام‌های مربوط به قوائد به‌صورت پاپ‌آپ با دکمه متوجه شدم» + «زیر خط پیغام‌ها را حذف کن» | Rule messages appeared as 2.6-second top toasts; the toast shadow rendered as a hard line under the banner | Chain-rule violations (event editor + chain screen) and program-rule violations (chain + assign screens) open as **scrollable popups with a single «متوجه شدم» button** (`rule_popup.dart`); the toast drop shadow is removed |
+| 8 | Screen-off during a long transfer would kill the session | Not handled | The native `setKeepScreenOn` channel keeps the screen awake from «شروع انتقال» until the flow ends |
+
+Verification pipeline unchanged: `flutter gen-l10n` → `flutter analyze` →
+`flutter test` → `flutter build apk --release`. The map.ir key is passed
+as a repository secret (`MAP_IR_API_KEY`) — builds without it succeed and
+render the OSM fallback.
 
 ## What is new in v4.2.0 (field-report release: real ST25DV addressing,
 NDEF dispatch claim, chain-wipe fix, map connectivity)
@@ -180,10 +207,28 @@ flutter gen-l10n
 flutter analyze --no-fatal-infos
 flutter test
 
-# 5. Release APK
-flutter build apk --release
+# 5. Release APK — with the map.ir key (recommended)
+flutter build apk --release \
+  --dart-define=MAP_IR_API_KEY=<YOUR_MAP_IR_KEY>
 # → build/app/outputs/flutter-apk/app-release.apk
 ```
+
+### map.ir access key (v4.3)
+
+The Location map renders the Iranian **map.ir** raster tiles
+(`https://map.ir/shiveh/{z}/{x}/{y}.png`) which load fast inside Iran.
+map.ir authenticates the requests with an `x-api-key` header.
+
+* **GitHub Actions (recommended):** add a repository secret named
+  `MAP_IR_API_KEY` (Settings → Secrets and variables → Actions → New
+  repository secret) and paste the key from the map.ir dashboard. The
+  workflow already passes it to the build with `--dart-define`.
+* **No key?** The build still succeeds and the map falls back to the
+  key-less OpenStreetMap tiles (and to OSM automatically at runtime when
+  map.ir is unreachable or the key expires — the map keys have a limited
+  validity and must be renewed in the map.ir dashboard).
+* The key is never hard-coded into the repository; it is injected at
+  build time.
 
 ### GitHub Actions
 
@@ -196,10 +241,10 @@ fully reproduced locally with Flutter 3.50.1 / Dart 3.14.0 (analyze
 the release APK of this version is produced by the GitHub Actions run
 of this repository.
 
-The
-first CI build additionally downloads the Android NDK (≈ 2.5 GB, required
-by the `jni` native layer of `flutter_nfc_kit`) — later builds are cached
-and fast.
+v4.3 note: **flutter_nfc_kit was removed** — the NFC transport is the
+native reader-mode layer in `MainActivity.kt`. The NDK download of the
+earlier builds (pulled by the plugin's `jni` layer) is gone: CI builds
+are leaner and faster.
 
 ## Field-test loop
 

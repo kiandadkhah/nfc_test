@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/nfc/nfc_service.dart';
 import '../core/nfc/real_nfc_service.dart';
+import '../core/platform/system_gate.dart';
 import 'providers.dart';
 
 class WriteFlowController extends ChangeNotifier {
@@ -29,6 +30,10 @@ class WriteFlowController extends ChangeNotifier {
   bool polling = false;
   FailureKind? failure;
   int? failedStep;
+
+  /// v4.3 — raw engine error code of the failure (e.g. payload_not_written);
+  /// the dialog maps the known codes to bespoke user-facing messages.
+  String? failureCode;
   bool completed = false;
   int? newVersion;
 
@@ -46,6 +51,7 @@ class WriteFlowController extends ChangeNotifier {
     completed = false;
     failure = null;
     failedStep = null;
+    failureCode = null;
     newVersion = null;
     powerOffDetected = false;
     skipClock = false;
@@ -61,6 +67,7 @@ class WriteFlowController extends ChangeNotifier {
     polling = false;
     failure = null;
     failedStep = null;
+    failureCode = null;
     completed = false;
     powerOffDetected = false;
   }
@@ -86,7 +93,12 @@ class WriteFlowController extends ChangeNotifier {
         ..utcOffsetHours = settings.utcOffsetHours;
     }
     logger.action('write started — mode=${mode!.name}, attempt=$attempt, '
-        'programs=${programs.enabledPrograms.length}');
+        'programs=${programs.enabledPrograms.length} '
+        '(events=${programs.enabledEventUsage}, timers=${programs.enabledTimerUsage})');
+
+    // v4.3 — a screen-off would release the NFC reader mode and kill the
+    // session mid-protocol; the screen stays awake until the flow ends.
+    await setKeepScreenOn(true);
 
     _sub?.cancel();
     _sub = service.write(mode!, fromStep: 1, skipClock: skipClock).listen((p) {
@@ -100,6 +112,8 @@ class WriteFlowController extends ChangeNotifier {
       polling = false;
       running = false;
       failure = p.failure;
+      failureCode = p.failureCode;
+      _releaseScreen();
       logger.warn('write flow: pre-protocol failure (${p.failure})');
       notifyListeners();
       return;
@@ -109,6 +123,7 @@ class WriteFlowController extends ChangeNotifier {
       // Step 1/2 halted — relay has no power supply.
       running = false;
       powerOffDetected = true;
+      _releaseScreen();
       logger.warn('write flow halted: relay without power supply');
       notifyListeners();
       return;
@@ -120,14 +135,22 @@ class WriteFlowController extends ChangeNotifier {
       running = false;
       failure = p.failure;
       failedStep = p.failedStep;
+      failureCode = p.failureCode;
+      _releaseScreen();
     }
     if (p.completed) {
       running = false;
       completed = true;
       newVersion = p.newVersion;
+      _releaseScreen();
       logger.action('write completed — new version=${p.newVersion}');
     }
     notifyListeners();
+  }
+
+  /// Screen can sleep again — the flow ended (success / failure / halt).
+  void _releaseScreen() {
+    setKeepScreenOn(false);
   }
 
   /// «ادامه ارسال» on the unpowered relay: step 1 is marked done and the
@@ -143,6 +166,7 @@ class WriteFlowController extends ChangeNotifier {
     final service = _ref.read(nfcServiceProvider);
     final logger = _ref.read(appLoggerProvider);
     logger.action('write continues without clock sync (unpowered relay)');
+    await setKeepScreenOn(true);
     _sub?.cancel();
     _sub = service.write(mode!, fromStep: 2, skipClock: true).listen((p) {
       _handle(p);
@@ -154,6 +178,7 @@ class WriteFlowController extends ChangeNotifier {
     _sub?.cancel();
     _sub = null;
     _resetSteps();
+    _releaseScreen();
     notifyListeners();
   }
 
@@ -163,6 +188,7 @@ class WriteFlowController extends ChangeNotifier {
     _sub?.cancel();
     _sub = null;
     _resetSteps();
+    _releaseScreen();
     notifyListeners();
   }
 
@@ -170,6 +196,7 @@ class WriteFlowController extends ChangeNotifier {
     completed = false;
     failure = null;
     failedStep = null;
+    failureCode = null;
     newVersion = null;
     _resetSteps();
     notifyListeners();

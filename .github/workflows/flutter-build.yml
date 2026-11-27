@@ -44,7 +44,13 @@ jobs:
         run: flutter test
 
       - name: Build release APK
-        run: flutter build apk --release
+        # MAP_IR_API_KEY: the map.ir access key (v4.3 Iranian tile service).
+        # Set it as a repository secret (Settings → Secrets → Actions);
+        # when it is not set the map falls back to the key-less
+        # OpenStreetMap tiles and the build still succeeds.
+        run: >-
+          flutter build apk --release
+          --dart-define=MAP_IR_API_KEY=${{ secrets.MAP_IR_API_KEY }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7

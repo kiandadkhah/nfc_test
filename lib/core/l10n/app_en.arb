@@ -985,5 +985,109 @@
   "gateStripHint": "NFC or location is not ready — some features cannot work until it is fixed.",
   "gpsMapTitle": "Pick the position on the map",
   "gpsMapHint": "Tap anywhere on the map to move the marker, then confirm.",
-  "gpsPhonePos": "Phone position"
+  "gpsPhonePos": "Phone position",
+  "ruleOk": "Got it",
+  "rulePopupIntro": "The messages below are raised by the defined rules; after the correction you can continue.",
+  "idLinkInvalidTitle": "Tag link is not valid",
+  "idLinkInvalidText": "The NDEF content of the tag is “{uri}”; this value matches none of the defined KIANEX product links, so the tag is NOT accepted as a PTS50 device.",
+  "@idLinkInvalidText": {
+    "placeholders": {
+      "uri": {
+        "type": "String"
+      }
+    }
+  },
+  "idModelUnsupportedTitle": "Tag recognized — model not supported",
+  "idModelUnsupportedText": "The device model “{model}” was decoded from the tag link; this app build only programs {supported}.",
+  "@idModelUnsupportedText": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      },
+      "supported": {
+        "type": "String"
+      }
+    }
+  },
+  "idUidWarnTitle": "UID signature mismatch",
+  "idUidWarnText": "The tag UID does not carry the ST25DV16KC processor signature (prefix E0 02 26); the tag may not be the expected hardware.",
+  "idLinkModel": "Model decoded from the link",
+  "mapIrFallback": "The map.ir service is not responding; the map temporarily falls back to OpenStreetMap tiles.",
+  "progRuleTitle": "Program rules",
+  "progRulesBlock": "Saving is blocked: {n} program-rule conflict(s) exist between the enabled programs.",
+  "@progRulesBlock": {
+    "placeholders": {
+      "n": {
+        "type": "String"
+      }
+    }
+  },
+  "progP1": "Only ONE daily program can stay enabled. “{a}” and “{b}” are both daily — the daily slot of the tag memory accepts a single chain.",
+  "@progP1": {
+    "placeholders": {
+      "a": {
+        "type": "String"
+      },
+      "b": {
+        "type": "String"
+      }
+    }
+  },
+  "progP2": "The weekly programs “{a}” and “{b}” are both assigned to the same weekdays ({days}). Each weekday slot holds exactly one chain — shorten the days of one program or disable it.",
+  "@progP2": {
+    "placeholders": {
+      "a": {
+        "type": "String"
+      },
+      "b": {
+        "type": "String"
+      },
+      "days": {
+        "type": "String"
+      }
+    }
+  },
+  "progP3": "The monthly programs “{a}” and “{b}” are both assigned to the same month days ({days}). Each month-day slot holds exactly one chain — shorten the days of one program or disable it.",
+  "@progP3": {
+    "placeholders": {
+      "a": {
+        "type": "String"
+      },
+      "b": {
+        "type": "String"
+      },
+      "days": {
+        "type": "String"
+      }
+    }
+  },
+  "progP4": "The annual programs “{a}” and “{b}” are both assigned to the same dates of the year ({days}). Each year-day slot holds exactly one chain — shorten the dates of one program or disable it.",
+  "@progP4": {
+    "placeholders": {
+      "a": {
+        "type": "String"
+      },
+      "b": {
+        "type": "String"
+      },
+      "days": {
+        "type": "String"
+      }
+    }
+  },
+  "progP5": "The daily program “{a}” runs together with “{b}”. Per the cycle priority (annual > monthly > weekly > daily) the daily chain does NOT run on the days those programs claim.",
+  "@progP5": {
+    "placeholders": {
+      "a": {
+        "type": "String"
+      },
+      "b": {
+        "type": "String"
+      }
+    }
+  },
+  "wpFailPayload": "Writing the programs to the tag memory failed verification: the blocks were read back and a mismatch remained. Keep the phone steady on the device and try again; the log holds the failing block number.",
+  "wpFailNoPrograms": "No enabled program exists to transfer. Enable at least one program (or choose «Settings only»).",
+  "wpFailModel": "The tag link is not the whitelisted PTS50R1 product URL, or the recognized model is not supported. The transfer only runs on an original PTS50R1 tag.",
+  "wpFailUid": "The tag UID does not carry the ST25DV16KC signature — the transfer was stopped."
 }

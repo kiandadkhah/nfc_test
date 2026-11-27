@@ -133,15 +133,14 @@ class RealNfcService implements NfcService {
         _engine?.cancel();
         _engine = null;
         _log.nfc('write: aborted — ${e.message} code=${e.errorCode}');
+        final msg = e.message;
+        final busy = msg.contains('busy') || msg.contains('no_tag');
         controller.add(WriteProgress(
           step: 0,
           status: StepStatus.failed,
-          failure: e.message.contains('busy') || e.message.contains('no_tag')
-              ? FailureKind.tagBusy
-              : FailureKind.stepFailed,
-          failedStep: e.message.contains('busy') || e.message.contains('no_tag')
-              ? null
-              : 0,
+          failure: busy ? FailureKind.tagBusy : FailureKind.stepFailed,
+          failedStep: busy ? null : 0,
+          failureCode: msg,
         ));
       } catch (e) {
         await _link?.close();
@@ -240,15 +239,19 @@ class RealNfcService implements NfcService {
       );
       const requiredBlocks = SotMemoryMap.planningEndBlock + 1;
       final enoughMemory = link.totalBlocks >= requiredBlocks;
-      // The factory NDEF URI identifies the product — the accepted prefix
-      // is the KIANEX PTS50 product page (NdefContract). [v4.1: exact URL]
-      final modelMatched = NdefContract.uriMatchesProduct(ndefUri);
+      // v4.3 — the three device checks of the field report: (1) the NDEF
+      // link must be an EXACT whitelisted product URL (never a prefix
+      // match — …/pts50r15 is a PTS50R15, not this device); (2) the UID
+      // must carry the ST25DV16KC signature; (3) the tag memory must cover
+      // the shared-memory layout.
+      final recognizedModel = NdefContract.modelOfUri(ndefUri);
+      final modelMatched = recognizedModel == NdefContract.supportedModel;
+      final uidOk = NdefContract.uidHasSt25dv16kSignature(link.tagUid);
       _log.nfc('identify: uri="$ndefUri" expected="${NdefContract.productUrl}" '
-          'prefix="${NdefContract.productUrlPrefix}" '
-          'model=${info.modelName} '
+          'recognizedModel=$recognizedModel model=${info.modelName} '
           'blocks=${link.totalBlocks}/${link.blockSize}B '
           'icRef=0x${link.icRef.toRadixString(16)} '
-          'enoughMemory=$enoughMemory modelMatched=$modelMatched');
+          'enoughMemory=$enoughMemory uidSignature=$uidOk modelMatched=$modelMatched');
       return TagIdentity(
         uid: link.tagUid,
         modelName: info.modelName,
@@ -258,6 +261,8 @@ class RealNfcService implements NfcService {
         ndefUri: ndefUri,
         enoughMemory: enoughMemory,
         modelMatched: modelMatched,
+        recognizedModel: recognizedModel,
+        uidSignatureOk: uidOk,
       );
     } finally {
       await link.close();

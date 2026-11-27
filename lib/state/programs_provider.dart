@@ -49,6 +49,22 @@ class ProgramsController extends ChangeNotifier {
   int get draftEditIndex => _draftEditIndex;
   bool get hasDraft => _draft != null;
 
+  /// v4.3 — program-rule violations of the last [saveDraft] attempt (also
+  /// filled by the Chain/Assign screens through [draftProgramViolations]).
+  List<ProgramViolation> _lastProgramViolations = const [];
+  List<ProgramViolation> get lastProgramViolations => _lastProgramViolations;
+
+  /// Program-rule violations of the current draft against the saved list —
+  /// the exact set the next transfer would carry. [includeAdvisory] adds
+  /// the non-blocking P-05 daily-shadowing notice.
+  List<ProgramViolation> draftProgramViolations({bool includeAdvisory = true}) =>
+      programRuleViolations(
+        _programs,
+        draft: _draft,
+        draftEditIndex: _draftEditIndex,
+        includeAdvisory: includeAdvisory,
+      );
+
   int get eventUsage => eventPoolUsage(_programs);
   int get timerUsage => timerPoolUsage(_programs);
 
@@ -162,10 +178,12 @@ class ProgramsController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Saves the draft. Returns false when validation fails (Q-10 / capacity)
-  /// or when the edited program no longer exists — the draft is discarded so
-  /// a deleted program can never be resurrected by «ذخیره برنامه» (bug fix:
-  /// «در حالت ویرایش نباید آثاری از برنامه حذف‌شده باقی بماند»).
+  /// Saves the draft. Returns false when validation fails (Q-10 / capacity
+  /// / v4.3 program-overlap rules) or when the edited program no longer
+  /// exists — the draft is discarded so a deleted program can never be
+  /// resurrected by «ذخیره برنامه» (bug fix: «در حالت ویرایش نباید آثاری
+  /// از برنامه حذف‌شده باقی بماند»). The blocking rule set is exposed via
+  /// [lastProgramViolations] so the caller can show the formal popup.
   bool saveDraft() {
     final d = _draft;
     if (d == null || d.name.isEmpty || d.events.isEmpty) return false;
@@ -178,6 +196,15 @@ class ProgramsController extends ChangeNotifier {
         (replaceEnabled ? _programs[_draftEditIndex].events.length : 0) +
         d.events.length;
     if (projected > DomainLimits.maxEvents) return false;
+    // v4.3 program rules — a day slot of the device memory can hold only
+    // ONE chain pointer; an overlapping save would silently overwrite the
+    // first program. The violations are kept for the UI popup.
+    _lastProgramViolations = programRuleViolations(
+      _programs,
+      draft: d,
+      draftEditIndex: _draftEditIndex,
+    );
+    if (_lastProgramViolations.any((v) => v.blocking)) return false;
     if (_draftEditIndex >= 0) {
       if (_draftEditIndex >= _programs.length) {
         // The edited program was deleted while the editor was open.

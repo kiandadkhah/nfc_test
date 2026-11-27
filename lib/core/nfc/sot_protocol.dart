@@ -55,6 +55,11 @@ class SotProtocol {
   bool _cancelled = false;
   void cancel() => _cancelled = true;
 
+  /// CRC-32/MPEG-2 over 1656 zero bytes (blocks 16..429) — the value the
+  /// v4.2.0 field analysis read from the real tag. Used as a sentinel to
+  /// detect a write that never committed.
+  static const int payloadEmptyCrc = 0x0993D8D7;
+
   /// Reads a contiguous block range (chunked multi-block reads), Byte_0..
   /// Byte_3 per block, with progress ticks.
   Future<List<Uint8List>> _readRange(
@@ -76,12 +81,54 @@ class SotProtocol {
   Future<void> _writeRange(List<int> blocks, Uint8List Function(int block) dataOf,
       void Function(int done, int total)? onTick) async {
     final total = blocks.length;
-    for (var i = 0; i < total; i++) {
-      await _link.writeBlock(blocks[i], dataOf(blocks[i]));
-      if (i % 32 == 31 || i == total - 1) {
-        onTick?.call(i + 1, total);
+    const verifyChunk = 8;
+    var done = 0;
+    for (var i = 0; i < total; i += verifyChunk) {
+      final end = (i + verifyChunk) > total ? total : (i + verifyChunk);
+      final chunk = blocks.sublist(i, end);
+      // Write the chunk with a small breathing room per block — respects
+      // the EEPROM write-cycle window (arbitration with the MCU's I²C).
+      for (final b in chunk) {
+        await _link.writeBlock(b, dataOf(b));
+        await Future<void>.delayed(const Duration(milliseconds: 4));
+      }
+      // Read the chunk back and compare byte-exactly against the plan.
+      var stale = await _verifyChunk(chunk, dataOf);
+      for (var round = 0; round < 2 && stale.isNotEmpty; round++) {
+        _log.nfc('step4: verify — ${stale.length} stale block(s) '
+            '[${stale.take(6).join(',')}] — rewriting (round ${round + 1})');
+        for (final b in stale) {
+          await _link.writeBlock(b, dataOf(b));
+          await Future<void>.delayed(const Duration(milliseconds: 4));
+        }
+        stale = await _verifyChunk(chunk, dataOf);
+      }
+      if (stale.isNotEmpty) {
+        throw TagLinkException('write_verify_failed:${stale.first}');
+      }
+      done = end;
+      onTick?.call(done, total);
+    }
+  }
+
+  /// Byte-level comparison of a written chunk against the plan; returns
+  /// the block numbers whose content on the tag does not match yet.
+  Future<List<int>> _verifyChunk(
+      List<int> chunk, Uint8List Function(int block) dataOf) async {
+    final readBack = await _link.readBlockRange(chunk.first, chunk.last);
+    final stale = <int>[];
+    for (var k = 0; k < chunk.length; k++) {
+      final want = dataOf(chunk[k]);
+      final got = readBack[k];
+      for (var j = 0; j < 4; j++) {
+        final expected = j < want.length ? want[j] : 0;
+        if (j >= got.length || got[j] != expected) {
+          stale.add(chunk[k]);
+          break;
+        }
       }
     }
+    return stale;
   }
 
   /// Computes CRC-32/MPEG-2 over blocks 16..429 for one read-back image
@@ -151,6 +198,14 @@ class SotProtocol {
     bool skipClock = false,
   }) async {
     _cancelled = false;
+    // v4.3 guard — a program transfer with zero enabled programs would
+    // produce an empty event/timer pool; refuse it instead of "successfully"
+    // writing an empty payload (field report: the pools were empty on the
+    // tag after a supposedly complete transfer).
+    if (req.mode == WriteMode.programAndSettings && req.enabledPrograms.isEmpty) {
+      _log.nfc('run: refused — program mode with no enabled programs');
+      throw const TagLinkException('no_programs');
+    }
     final startCode =
         req.mode == WriteMode.programAndSettings ? ProcessCodes.programStart : ProcessCodes.settingsStart;
     final completeCode =
@@ -162,7 +217,7 @@ class SotProtocol {
     _readBackImage = null;
     var doneCount = fromStep - 1;
 
-    void emit(int step, StepStatus status, {bool completed = false, int? newVersion, FailureKind? failure, int? failedStep, bool powerOff = false}) {
+    void emit(int step, StepStatus status, {bool completed = false, int? newVersion, FailureKind? failure, int? failedStep, bool powerOff = false, String? failureCode}) {
       onProgress(WriteProgress(
         step: step,
         status: status,
@@ -172,6 +227,7 @@ class SotProtocol {
         failedStep: failedStep,
         powerOff: powerOff,
         doneCount: doneCount,
+        failureCode: failureCode,
       ));
     }
 
@@ -184,10 +240,11 @@ class SotProtocol {
           case 1:
             // Read the onboarding area (blocks 0..15) and identify the tag:
             // CC file must be a valid Type 5 CC (magic E1/E2), the factory
-            // NDEF URI must point at the KIANEX product page
-            // (NdefContract — https://kianex.co/products/pts50…), and the
-            // tag memory must cover the shared-memory layout (any larger
-            // Type 5 model is accepted — multi-model NFC layer).
+            // NDEF URI must be the EXACT whitelisted product link of the
+            // supported model (NdefContract — prefix matching is FORBIDDEN,
+            // v4.2.0 report: a …/pts50r15 tag must fail), the UID must
+            // carry the ST25DV16KC signature, and the tag memory must cover
+            // the shared-memory layout.
             final cc = await _link.readBlock(SotMemoryMap.blockCc);
             final magic = cc[0];
             _log.nfc('step1: CC magic=0x${magic.toRadixString(16)} '
@@ -197,10 +254,21 @@ class SotProtocol {
               throw const TagLinkException('not_type5_tag');
             }
             final ndefUri = await readOnboardingUri();
-            if (!NdefContract.uriMatchesProduct(ndefUri)) {
-              _log.nfc('step1: expected product URI prefix '
-                  '"${NdefContract.productUrlPrefix}" — got "$ndefUri"');
-              throw TagLinkException('model_mismatch:$ndefUri');
+            final model = NdefContract.modelOfUri(ndefUri);
+            if (model == null) {
+              _log.nfc('step1: URI is not a whitelisted product link — got "$ndefUri"');
+              throw TagLinkException('link_invalid:$ndefUri');
+            }
+            if (model != NdefContract.supportedModel) {
+              _log.nfc('step1: recognized model $model is not supported '
+                  '(${NdefContract.supportedModel} required)');
+              throw TagLinkException('model_unsupported:$model');
+            }
+            final uidOk = NdefContract.uidHasSt25dv16kSignature(_link.tagUid);
+            if (!uidOk) {
+              _log.nfc('step1: UID signature mismatch — uid=${_link.tagUid} '
+                  'expected prefix E0 02 26 (ST25DV16KC)');
+              throw const TagLinkException('uid_signature');
             }
             const requiredBlocks = SotMemoryMap.planningEndBlock + 1;
             if (_link.totalBlocks > 0 && _link.totalBlocks < requiredBlocks) {
@@ -245,9 +313,14 @@ class SotProtocol {
 
           case 4:
             // Build and write the target area; RES bytes are already 0x00.
+            // v4.3 hardening: every chunk is READ BACK and compared right
+            // after it is written, stale blocks are rewritten twice — the
+            // v4.2.0 field analysis (APP_CRC32 = CRC of an all-zero payload
+            // = 0x0993D8D7 on the real tag) proved that silent write loss
+            // was being validated as success before.
             final plan = _buildPlan(req, runVersion + 1, skipClock);
             await _writeRange(plan.blocks, plan.dataOf, (done, total) {
-              _log.nfc('step4: blocks $done/$total written');
+              _log.nfc('step4: blocks $done/$total written+verified');
             });
             doneCount += 1;
             emit(step, StepStatus.done);
@@ -301,6 +374,18 @@ class SotProtocol {
             if (recomputed != storedCrc) {
               throw TagLinkException('crc_mismatch:${recomputed.toRadixString(16)}!=${storedCrc.toRadixString(16)}');
             }
+            // v4.3 sentinel — the CRC of an ALL-ZERO planning payload is
+            // 0x0993D8D7 (proven by the v4.2.0 field analysis). A complete
+            // program transfer can never produce that value: the solar
+            // coefficients and the clock bytes alone are non-zero.
+            if (req.mode == WriteMode.programAndSettings &&
+                !skipClock &&
+                req.enabledPrograms.isNotEmpty &&
+                recomputed == payloadEmptyCrc) {
+              _log.nfc('step7: payload sentinel hit — read-back CRC equals the '
+                  'all-zero payload CRC; the programs were not stored');
+              throw const TagLinkException('payload_not_written');
+            }
             doneCount += 1;
             emit(step, StepStatus.done);
 
@@ -321,7 +406,10 @@ class SotProtocol {
         }
       } on TagLinkException catch (e) {
         _log.error('protocol step $step failed: ${e.message} code=${e.errorCode}');
-        emit(step, StepStatus.failed, failure: FailureKind.stepFailed, failedStep: step);
+        emit(step, StepStatus.failed,
+            failure: FailureKind.stepFailed,
+            failedStep: step,
+            failureCode: e.message);
         rethrow;
       }
     }

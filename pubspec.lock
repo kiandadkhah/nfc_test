@@ -65,14 +65,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.19.1"
-  convert:
-    dependency: transitive
-    description:
-      name: convert
-      sha256: b30acd5944035672bc15c6b7a8b47d773e41e2f17de064350988c5d02adb1c68
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.1.2"
   cross_file:
     dependency: transitive
     description:
@@ -171,14 +163,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.0.2"
-  flutter_nfc_kit:
-    dependency: "direct main"
-    description:
-      name: flutter_nfc_kit
-      sha256: aaf11749318e7e5cf8c54eb6c3ee02685ccc7021efd3cf467a5f106cdc752a66
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.7.0"
   flutter_riverpod:
     dependency: "direct main"
     description:
@@ -341,14 +325,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.0"
-  json_annotation:
-    dependency: transitive
-    description:
-      name: json_annotation
-      sha256: "2a743920d81b7910627f68ee2c9ac1fc0bfee32b9fc3403587d7c6791ca12f80"
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.12.0"
   latlong2:
     dependency: "direct main"
     description:
@@ -461,14 +437,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.0"
-  ndef:
-    dependency: transitive
-    description:
-      name: ndef
-      sha256: "198ba3798e80cea381648569d84059dbba64cd140079fb7b0d9c3f1e0f5973f3"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.4.0"
   objective_c:
     dependency: transitive
     description:
@@ -778,14 +746,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.3.1"
-  universal_platform:
-    dependency: transitive
-    description:
-      name: universal_platform
-      sha256: "64e16458a0ea9b99260ceb5467a214c1f298d647c659af1bff6d3bf82536b1ec"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.1.0"
   url_launcher_linux:
     dependency: transitive
     description:

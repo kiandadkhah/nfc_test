@@ -24,6 +24,7 @@ class WriteProgress {
     this.newVersion,
     this.powerOff = false,
     this.doneCount,
+    this.failureCode,
   });
 
   final int step; // 1..8 (0 = polling phase)
@@ -40,6 +41,12 @@ class WriteProgress {
 
   /// Number of steps already done (progress arc), when known.
   final int? doneCount;
+
+  /// v4.3 — the raw engine error code (TagLinkException.message) of a
+  /// failed step; the dialog maps the known codes to bespoke messages
+  /// (payload_not_written / no_programs / link_invalid / model_unsupported
+  /// / uid_signature / write_verify_failed).
+  final String? failureCode;
 }
 
 /// Result of a successful tag identification (device sheet / onboarding).
@@ -53,6 +60,8 @@ class TagIdentity {
     required this.ndefUri,
     required this.enoughMemory,
     required this.modelMatched,
+    this.recognizedModel,
+    this.uidSignatureOk = true,
   });
 
   final String uid;
@@ -66,8 +75,20 @@ class TagIdentity {
   /// layout (blocks 0..431 + logger area).
   final bool enoughMemory;
 
-  /// True when the factory NDEF payload carries the KIANEX model marker.
+  /// True when the factory NDEF payload is the EXACT link of the supported
+  /// model (PTS50R1). [v4.3 exact-whitelist rule]
   final bool modelMatched;
+
+  /// v4.3 — the model decoded from the whitelisted NDEF link, or null when
+  /// the link is unknown. A non-null value that is not the supported model
+  /// (e.g. PTS50R15) gets its own, explicit message.
+  final String? recognizedModel;
+
+  /// v4.3 — the UID carries the ST25DV16KC signature (E0 02 26 …).
+  final bool uidSignatureOk;
+
+  /// One of the three device checks failed (link / UID / memory).
+  bool get hasWarning => !modelMatched || !enoughMemory || !uidSignatureOk;
 }
 
 /// The eight protocol steps of SOT table 4-4, in mandatory order.

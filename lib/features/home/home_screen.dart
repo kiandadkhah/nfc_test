@@ -969,7 +969,7 @@ class _IdentifyOverlayState extends ConsumerState<_IdentifyOverlay> {
       logger.warn('identify failed: ${e.message}');
       setState(() {
         _failureKey = e.message;
-        _failureDetail = e.message.startsWith('model_mismatch:') ||
+        _failureDetail = e.message.startsWith('link_invalid:') ||
                 e.message.startsWith('memory_too_small:')
             ? e.message.split(':').sublist(1).join(':')
             : null;
@@ -1043,7 +1043,34 @@ class _IdentifyOverlayState extends ConsumerState<_IdentifyOverlay> {
   }
 
   Widget _result(BuildContext context, AppLocalizationsX l, bool fa, TagIdentity id) {
-    final warn = !id.modelMatched || !id.enoughMemory;
+    // v4.3 — four warn cases, in decision order: memory, unknown link,
+    // recognized-but-unsupported model (e.g. PTS50R15), UID signature.
+    final (title, text, warnColor) = switch (id) {
+      _ when !id.enoughMemory => (
+          l.idMemoryWarnTitle,
+          l.idMemoryWarnText,
+          const Color(0xFFE4695C),
+        ),
+      _ when id.recognizedModel == null => (
+          l.idLinkInvalidTitle,
+          l.idLinkInvalidText(
+              id.ndefUri.isEmpty ? '—' : id.ndefUri),
+          const Color(0xFFE4695C),
+        ),
+      _ when !id.modelMatched => (
+          l.idModelUnsupportedTitle,
+          l.idModelUnsupportedText(
+              id.recognizedModel ?? '-', NdefContract.supportedModel),
+          const Color(0xFFE4695C),
+        ),
+      _ when !id.uidSignatureOk => (
+          l.idUidWarnTitle,
+          l.idUidWarnText,
+          const Color(0xFFE4695C),
+        ),
+      _ => ('', '', const Color(0xFF35C584)),
+    };
+    final warn = title.isNotEmpty;
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -1052,23 +1079,19 @@ class _IdentifyOverlayState extends ConsumerState<_IdentifyOverlay> {
           children: [
             Icon(
               warn ? Icons.report_problem_outlined : Icons.check_circle_outline,
-              color: warn ? const Color(0xFFE4695C) : const Color(0xFF35C584),
+              color: warnColor,
               size: 68,
             ),
             const SizedBox(height: 14),
             Text(
-              warn
-                  ? (!id.modelMatched ? l.idModelWarnTitle : l.idMemoryWarnTitle)
-                  : l.dsFound,
+              warn ? title : l.dsFound,
               textAlign: TextAlign.center,
               style: const TextStyle(
                   color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 6),
             Text(
-              warn
-                  ? (!id.modelMatched ? l.idModelWarnText : l.idMemoryWarnText)
-                  : l.dsFoundD,
+              warn ? text : l.dsFoundD,
               textAlign: TextAlign.center,
               style: TextStyle(
                   color: Colors.grey.shade400, fontSize: 11.5, height: 1.8),
@@ -1086,6 +1109,8 @@ class _IdentifyOverlayState extends ConsumerState<_IdentifyOverlay> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _kv(l.idTagModel, id.modelName.isEmpty ? '—' : id.modelName),
+                  _kv(l.idLinkModel,
+                      id.recognizedModel ?? '—'),
                   _kv(l.idTagMemory,
                       '${faNumInt(fa, id.totalBlocks)} × ${faNumInt(fa, id.blockSize)} B'),
                   _kv(l.idTagUid, id.uid),
@@ -1124,13 +1149,19 @@ class _IdentifyOverlayState extends ConsumerState<_IdentifyOverlay> {
   }
 
   Widget _failure(BuildContext context, AppLocalizationsX l) {
-    final message = switch (_failureKey) {
-      'no_tag' => l.idFailNoTag,
+    final key = _failureKey ?? 'no_tag';
+    // v4.3 — prefix matching: several codes carry a detail suffix
+    // (link_invalid:<uri>, model_unsupported:<model>, memory_too_small:<g>).
+    final message = switch (key) {
+      _ when key.startsWith('link_invalid') =>
+        l.idLinkInvalidText(_failureDetail ?? '—'),
+      _ when key.startsWith('model_unsupported') => l.idModelUnsupportedText(
+          _failureDetail ?? '-', NdefContract.supportedModel),
+      _ when key.startsWith('uid_signature') => l.idUidWarnText,
+      _ when key.startsWith('memory_too_small') => l.idFailMemory,
       'not_iso15693' => l.idFailNotIso,
       'not_type5_tag' => l.idFailNotIso,
       'nfc_disabled' => l.idFailNfcOff,
-      'memory_too_small' => l.idFailMemory,
-      'model_mismatch' => l.idFailModel,
       _ => l.idFailNoTag,
     };
     return Center(

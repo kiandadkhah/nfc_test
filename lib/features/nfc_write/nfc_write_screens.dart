@@ -9,6 +9,7 @@ import '../../core/utils/format.dart';
 import '../../core/utils/jalali.dart';
 import '../../core/widgets/nfc_hex_button.dart';
 import '../../state/providers.dart';
+import '../../state/write_flow_provider.dart';
 import '../../core/widgets/app_toasts.dart';
 
 /// Write confirmation — reviews the payload in user-friendly terms (no
@@ -269,9 +270,7 @@ class _WriteProgressDialogState extends ConsumerState<WriteProgressDialog> {
                           : flow.polling
                               ? l.wpPolling
                               : flow.failure != null
-                                  ? (flow.failedStep != null
-                                      ? l.wpFailStep(stepNames[flow.failedStep! - 1])
-                                      : l.wpFailBusy)
+                                  ? _failureText(l, flow, stepNames)
                                   : l.keepSteady,
                   style: TextStyle(color: Colors.grey.shade400, fontSize: 11.5, height: 1.8),
                   textAlign: TextAlign.center,
@@ -438,6 +437,33 @@ class _WriteProgressDialogState extends ConsumerState<WriteProgressDialog> {
         ),
       ),
     );
+  }
+
+  /// v4.3 — bespoke failure texts for the known engine codes: the empty
+  /// payload on the real tag (v4.2.0 report) and the new device checks get
+  /// their own, actionable wording instead of a generic step message.
+  String _failureText(
+      AppLocalizationsX l, WriteFlowController flow, List<String> stepNames) {
+    final code = flow.failureCode ?? '';
+    if (code.startsWith('payload_not_written') ||
+        code.startsWith('write_verify_failed') ||
+        code.startsWith('crc_mismatch')) {
+      return l.wpFailPayload;
+    }
+    if (code.startsWith('no_programs')) return l.wpFailNoPrograms;
+    if (code.startsWith('link_invalid') ||
+        code.startsWith('model_unsupported') ||
+        code.startsWith('model_mismatch')) {
+      return l.wpFailModel;
+    }
+    if (code.startsWith('uid_signature')) return l.wpFailUid;
+    if (code == 'not_iso15693' || code == 'not_type5_tag') {
+      return l.idFailNotIso;
+    }
+    if (code.startsWith('memory_too_small')) return l.idFailMemory;
+    return flow.failedStep != null && flow.failedStep! >= 1
+        ? l.wpFailStep(stepNames[flow.failedStep! - 1])
+        : l.wpFailBusy;
   }
 
   Widget _stepTile(BuildContext context,

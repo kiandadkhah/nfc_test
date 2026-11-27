@@ -415,3 +415,183 @@ bool eventCapacityOk(
       draftEvents.length;
   return usage <= DomainLimits.maxEvents;
 }
+
+// =====================================================================
+// v4.3 program rules — the day-slot architecture of the PTS50R1 memory
+// (map_memory_2.csv) allows exactly ONE chain per cycle slot:
+//   · block 118  — ONE daily head (the whole day table has one slot);
+//   · block 116/117 — 7 weekly day slots, one chain pointer per day;
+//   · block 108..110 — 31 monthly day slots;
+//   · block 16..107 — 366 annual day slots.
+// Writing two chains into the same slot silently overwrites the first
+// one (the v4.2.0 report: «برای روزهای شنبه و دوشنبه دو زنجیره رویداد
+// وجود دارد ولی از لحاظ معماری حافظه این امکان‌پذیر نیست»). The rules
+// below make the conflict explicit BEFORE anything reaches the tag.
+// =====================================================================
+
+/// The five program rules in evaluation priority order.
+enum ProgramRule {
+  /// P-01 — more than one enabled program with the DAILY cycle (the
+  /// daily day table holds a single head slot).
+  duplicateDaily,
+
+  /// P-02 — two enabled WEEKLY programs assigned to the same weekday.
+  weeklyOverlap,
+
+  /// P-03 — two enabled MONTHLY programs assigned to the same month day.
+  monthlyOverlap,
+
+  /// P-04 — two enabled ANNUAL programs assigned to the same year day.
+  annualOverlap,
+
+  /// P-05 (advisory, non-blocking) — an enabled DAILY program coexists
+  /// with another cycle: per C-05 priority (annual > monthly > weekly >
+  /// daily) the daily chain does NOT run on the days the other cycles
+  /// claim. The transfer is allowed; the user is informed.
+  dailyShadowed,
+}
+
+/// One program-rule violation. [a]/[b] are program names; [days] carries
+/// the conflicting day numbers (weekly: 0..6, monthly: 1..31, annual:
+/// 1..366) — the UI renders them with the localized day names.
+class ProgramViolation {
+  const ProgramViolation(
+    this.rule,
+    this.a,
+    this.b, {
+    this.days = const [],
+  });
+
+  final ProgramRule rule;
+  final String a;
+  final String b;
+  final List<int> days;
+
+  /// P-05 is an informational warning, the other rules block the save.
+  bool get blocking => rule != ProgramRule.dailyShadowed;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ProgramViolation &&
+      other.rule == rule &&
+      other.a == a &&
+      other.b == b &&
+      other.days.length == days.length;
+
+  @override
+  int get hashCode => Object.hash(rule, a, b, days.length);
+}
+
+/// Effective list of ENABLED programs for the next transfer: the draft (if
+/// any) replaces the program being edited. Shared by the save check and
+/// the UI banners so both see the exact payload of the next NFC write.
+List<Program> effectiveEnabledPrograms(
+  List<Program> programs, {
+  Program? draft,
+  int draftEditIndex = -1,
+}) {
+  final out = <Program>[];
+  for (var i = 0; i < programs.length; i++) {
+    if (i == draftEditIndex) continue; // replaced by the draft
+    final p = programs[i];
+    if (p.enabled) out.add(p);
+  }
+  if (draft != null && draft.name.isNotEmpty) {
+    // The draft counts as enabled when the user is actively creating it
+    // (a disabled draft cannot exist — the master switch appears on the
+    // saved card only).
+    out.add(draft);
+  }
+  return out;
+}
+
+List<int> _sortedDays(Set<int> set) => (set.toList()..sort());
+
+/// Evaluates the program rules on the effective enabled list.
+/// [includeAdvisory] adds the P-05 daily-shadowing warning.
+List<ProgramViolation> programRuleViolations(
+  List<Program> programs, {
+  Program? draft,
+  int draftEditIndex = -1,
+  bool includeAdvisory = true,
+}) {
+  final enabled = effectiveEnabledPrograms(
+    programs,
+    draft: draft,
+    draftEditIndex: draftEditIndex,
+  );
+  final out = <ProgramViolation>[];
+
+  // P-01 — only ONE daily program can exist.
+  final dailies = enabled.where((p) => p.cycle == CycleType.daily).toList();
+  if (dailies.length > 1) {
+    out.add(ProgramViolation(
+      ProgramRule.duplicateDaily,
+      dailies.first.name,
+      dailies[1].name,
+    ));
+  }
+
+  // P-02..P-04 — same-cycle day overlap (day slots are unique).
+  for (final cycle in const [
+    (CycleType.weekly, ProgramRule.weeklyOverlap),
+    (CycleType.monthly, ProgramRule.monthlyOverlap),
+    (CycleType.annual, ProgramRule.annualOverlap),
+  ]) {
+    final kind = cycle.$1;
+    final sameCycle =
+        enabled.where((p) => p.cycle == kind).toList();
+    for (var i = 0; i < sameCycle.length; i++) {
+      for (var j = i + 1; j < sameCycle.length; j++) {
+        final d1 = _daysOf(sameCycle[i]);
+        final d2 = _daysOf(sameCycle[j]);
+        final shared = d1.intersection(d2);
+        if (shared.isNotEmpty) {
+          out.add(ProgramViolation(
+            cycle.$2,
+            sameCycle[i].name,
+            sameCycle[j].name,
+            days: _sortedDays(shared),
+          ));
+        }
+      }
+    }
+  }
+
+  // P-05 — daily coexisting with another cycle (advisory only).
+  if (includeAdvisory && dailies.isNotEmpty) {
+    final others = enabled
+        .where((p) =>
+            p.cycle == CycleType.weekly ||
+            p.cycle == CycleType.monthly ||
+            p.cycle == CycleType.annual)
+        .toList();
+    if (others.isNotEmpty) {
+      out.add(ProgramViolation(
+        ProgramRule.dailyShadowed,
+        dailies.first.name,
+        others.map((p) => p.name).join('، '),
+        days: _sortedDays({
+          for (final p in others) ..._daysOf(p),
+        }),
+      ));
+    }
+  }
+  return out;
+}
+
+/// True when at least one BLOCKING program rule violation exists.
+bool programRulesBlock(
+  List<Program> programs, {
+  Program? draft,
+  int draftEditIndex = -1,
+}) =>
+    programRuleViolations(programs, draft: draft, draftEditIndex: draftEditIndex)
+        .any((v) => v.blocking);
+
+Set<int> _daysOf(Program p) => switch (p.cycle) {
+      CycleType.daily => const {0},
+      CycleType.weekly => p.assign.weekly.toSet(),
+      CycleType.monthly => p.assign.monthly.toSet(),
+      CycleType.annual => p.assign.annualDays.toSet(),
+    };

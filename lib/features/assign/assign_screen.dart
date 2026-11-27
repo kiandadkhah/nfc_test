@@ -7,8 +7,11 @@ import '../../core/state/app_providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
 import '../../core/utils/jalali.dart';
+import '../../core/widgets/rule_popup.dart';
 import '../../state/providers.dart';
 import '../../core/widgets/app_toasts.dart';
+import '../../features/program_flow/program_flow_screens.dart'
+    show programViolationText;
 
 /// Day assignment — weekly / monthly / annual grids, each followed by the
 /// «selected days» list (per-day remove), per the approved v2.2 design.
@@ -283,10 +286,7 @@ class AssignScreen extends ConsumerWidget {
           children: [
             Expanded(
               child: FilledButton.icon(
-                onPressed: () {
-                  context.pop();
-                  showAppMessage(context, l.asSaved);
-                },
+                onPressed: () => _confirmAssign(context, ref, l, fa),
                 icon: const Icon(Icons.check),
                 label: Text(l.asOk),
               ),
@@ -302,6 +302,36 @@ class AssignScreen extends ConsumerWidget {
         ),
       ],
     );
+  }
+
+  /// v4.3 — «تأیید» validates the program rules BEFORE closing: a day slot
+  /// of the device memory holds only one chain pointer, so an overlap with
+  /// another enabled program opens the formal popup instead of returning.
+  Future<void> _confirmAssign(
+    BuildContext context,
+    WidgetRef ref,
+    AppLocalizationsX l,
+    bool fa,
+  ) async {
+    final violations = ref
+        .read(programsProvider)
+        .draftProgramViolations(includeAdvisory: false)
+        .where((v) => v.blocking)
+        .toList();
+    if (!context.mounted) return;
+    if (violations.isNotEmpty) {
+      final year = gregorianToJalali(DateTime.now()).year;
+      await showRuleViolationPopup(
+        context,
+        title: l.progRuleTitle,
+        messages: [
+          for (final v in violations) programViolationText(l, fa, v, year: year),
+        ],
+      );
+      return;
+    }
+    context.pop();
+    showAppMessage(context, l.asSaved);
   }
 
   void _remove(BuildContext context, WidgetRef ref, AppLocalizationsX l, int value) {

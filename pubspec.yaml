@@ -1,7 +1,7 @@
 name: kianex_pts50n1_app
 description: KIANEX PTS50N1 companion app — Phase 2 (real ST25DV16KC NFC layer, Material 3, Riverpod, go_router, application logger).
 publish_to: 'none'
-version: 4.2.0+43
+version: 4.3.0+44
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -15,8 +15,10 @@ dependencies:
   flutter_riverpod: ^2.5.1
   go_router: ^14.2.0
   shared_preferences: ^2.2.3
-  # Real NFC transport (ISO 15693 raw commands for the ST25DV16KC shared memory).
-  flutter_nfc_kit: ^3.7.0
+  # Real NFC transport: v4.3 replaces the flutter_nfc_kit plugin with the
+  # native reader-mode layer (MainActivity.kt, channel kianex/nfc) that
+  # gives the app EXCLUSIVE NFC access for the whole foreground lifetime —
+  # the NDEF product URL can no longer be hijacked by the browser.
   # Renders the official KIANEX brand mark (LOGO_SVG.svg) as an asset.
   flutter_svg: ^2.5.0
   # Real GPS position of the relay — basis of the solar coefficients.
@@ -24,8 +26,8 @@ dependencies:
   # Application logger persistence + log export for the test reports.
   path_provider: ^2.1.6
   share_plus: ^13.3.1
-  # Real map display + marker picking on the Location screen (OSM tiles,
-  # no API key — v4.1 field report: «نقشه واقعی و انتخاب نشانگر»).
+  # Real map display + marker picking on the Location screen (v4.3: the
+  # Iranian map.ir raster tiles with an automatic OpenStreetMap fallback).
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
 

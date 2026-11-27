@@ -10,16 +10,18 @@ import 'package:kianex_pts50n1_app/state/providers.dart';
 
 import 'helpers/sample_data.dart';
 
-/// Stubs the platform channels the v4.1 startup gate touches, so the smoke
-/// test runs the REAL gate without native plugins: NFC reports as present
-/// and on, the location permission as granted and the location service as
-/// enabled — the gate completes silently and no guidance dialog pops up
-/// over the home screen. [v4.1]
+/// Stubs the platform channels the v4.1/v4.3 startup gate touches, so the
+/// smoke test runs the REAL gate without native plugins: the v4.3 native
+/// NFC channel (`kianex/nfc`) reports the adapter as present and on, the
+/// location permission as granted and the location service as enabled —
+/// the gate completes silently and no guidance dialog pops up over the
+/// home screen. [v4.1 → v4.3]
 void stubSystemChannels() {
-  const nfcChannel = MethodChannel('flutter_nfc_kit/method');
+  const nfcChannel = MethodChannel('kianex/nfc');
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(nfcChannel, (call) async {
-    if (call.method == 'getNFCAvailability') return 'available';
+    if (call.method == 'availability') return 'available';
+    if (call.method == 'enable') return true;
     return null;
   });
   // geolocator: in widget tests the federated plugin is NOT registered, so

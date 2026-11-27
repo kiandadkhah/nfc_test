@@ -10,6 +10,7 @@ import '../../core/utils/format.dart';
 import '../../core/utils/jalali.dart';
 import '../../core/validation/validators.dart';
 import '../../core/widgets/app_toasts.dart';
+import '../../core/widgets/rule_popup.dart';
 import '../../core/widgets/time_edit_fields.dart';
 import '../../state/providers.dart';
 
@@ -162,24 +163,34 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
     // occupy after the automatic time-based sort. [v4.1]
     final check = candidateCheck(_ev, existing, skipIndex: widget.editIndex);
     if (check.violations.isNotEmpty) {
-      final v = check.violations.first;
-      final other = v.a == check.position ? v.b : v.a;
-      final message = switch (v.rule) {
-        ChainRule.sameTime =>
-          v.minute != null
-              ? l.evRuleSameTime(faNumInt(fa, other + 1), '${num2(fa, v.minute! ~/ 60)}:${num2(fa, v.minute! % 60)}')
+      // v4.3 — the rule messages open as a POPUP with «متوجه شدم» (the top
+      // toast disappeared before the user could read them). Every violation
+      // involving the candidate is listed, in chain order.
+      final messages = <String>[];
+      final actName = _actName(l, _ev);
+      for (final v in check.violations) {
+        final other = v.a == check.position ? v.b : v.a;
+        messages.add(switch (v.rule) {
+          ChainRule.sameTime => v.minute != null
+              ? l.evRuleSameTime(faNumInt(fa, other + 1),
+                  '${num2(fa, v.minute! ~/ 60)}:${num2(fa, v.minute! % 60)}')
               : l.evRuleSameTimeSolar(faNumInt(fa, other + 1)),
-        ChainRule.minGap => l.evRuleMinGap(
-            faNumInt(fa, other + 1),
-            faNumInt(fa, v.gap ?? 0),
-          ),
-        ChainRule.sameAct => l.evRuleSameAct(
-            faNumInt(fa, other + 1),
-            _actName(l, _ev),
-          ),
-        ChainRule.sameTimer => l.evRuleSameTimer(faNumInt(fa, other + 1)),
-      };
-      showAppMessage(context, message, isError: true);
+          ChainRule.minGap => l.evRuleMinGap(
+              faNumInt(fa, other + 1),
+              faNumInt(fa, v.gap ?? 0),
+            ),
+          ChainRule.sameAct => l.evRuleSameAct(
+              faNumInt(fa, other + 1),
+              actName,
+            ),
+          ChainRule.sameTimer => l.evRuleSameTimer(faNumInt(fa, other + 1)),
+        });
+      }
+      await showRuleViolationPopup(
+        context,
+        title: l.ruleTitle,
+        messages: messages,
+      );
       return;
     }
     // Annual fixed↔solar coincidence — informational, explicit consent.

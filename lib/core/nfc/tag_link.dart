@@ -30,9 +30,9 @@
 /// field, so requests are non-addressed (no UID byte).
 library;
 
-import 'dart:typed_data';
+import 'package:flutter/services.dart';
 
-import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
+import 'native_transport.dart';
 
 /// Abstract transport so the protocol engine can be unit-tested against a
 /// fake tag image.
@@ -195,12 +195,20 @@ int iso15693Crc16(List<int> bytes) {
 }
 
 class Iso15693TagLink implements TagLink {
-  Iso15693TagLink._(this.tag, this._info, {void Function(String event)? onEvent})
+  Iso15693TagLink._(this._rawUidHex, {void Function(String event)? onEvent})
       : _onEvent = onEvent;
 
-  /// The polled tag metadata (id / dsfId available for diagnostics).
-  final NFCTag tag;
-  TagSystemInfo _info;
+  /// Raw tag id as reported by the discovery layer (LSB-first hex) — the
+  /// UI and the logs use the human-readable order via [tagUid].
+  final String _rawUidHex;
+  TagSystemInfo _info = const TagSystemInfo(
+    totalBlocks: 0,
+    blockSize: 0,
+    icRef: 0,
+    dsfid: 0,
+    afid: 0,
+    twoByteAddressing: false,
+  );
   final void Function(String event)? _onEvent;
 
   /// Set when the tag rejected the protocol-extension flag — the link
@@ -215,7 +223,7 @@ class Iso15693TagLink implements TagLink {
   /// Android reports the ISO 15693 UID LSB-first; the UI and the logs use
   /// the human-readable order printed on the tag (MSB first).
   @override
-  String get tagUid => uidInHumanOrder(tag.id);
+  String get tagUid => uidInHumanOrder(_rawUidHex);
   @override
   int get totalBlocks => _info.totalBlocks;
   @override
@@ -231,55 +239,49 @@ class Iso15693TagLink implements TagLink {
   bool get _useExtended =>
       !_forceStandard && (_info.known ? _info.totalBlocks > 256 : true);
 
-  /// Polls for an ISO 15693 tag and opens the session. Reads the tag
-  /// system info (standard Get System Info first, extended 0x3B second,
-  /// IC_REF profile as the final fallback) so the addressing mode and
-  /// memory geometry match the actual tag model, then verifies the
-  /// addressing mode with a block-0 probe.
+  /// Polls for an ISO 15693 tag over the native reader-mode transport and
+  /// opens the session. The reader mode itself is owned by the native layer
+  /// (enabled from onResume — exclusive access, no NDEF dispatch), so the
+  /// poll only connects the tag and reads its system info (standard Get
+  /// System Info first, extended 0x3B second, IC_REF profile as the final
+  /// fallback) so the addressing mode and memory geometry match the actual
+  /// tag model, then verifies the addressing mode with a block-0 probe.
   /// [timeout] bounds the whole poll; returns null when the user never
   /// presented a compatible tag. Throws [TagLinkException]('nfc_disabled')
   /// when the phone NFC adapter is off or absent.
   static Future<Iso15693TagLink?> open({
     Duration timeout = const Duration(seconds: 45),
-    String iosAlertMessage = 'برای شناسایی رله، گوشی را نزدیک تگ NFC نگه دارید',
     void Function(String event)? onEvent,
   }) async {
-    try {
-      final availability = await FlutterNfcKit.nfcAvailability;
-      if (availability != NFCAvailability.available) {
-        onEvent?.call('open: NFC adapter not available ($availability)');
-        throw const TagLinkException('nfc_disabled');
-      }
-    } on TagLinkException {
-      rethrow;
-    } catch (_) {
-      // availability check itself unsupported — continue with the poll
+    final transport = NativeNfcTransport.instance;
+    transport.onEvent = onEvent;
+    final availability = await transport.availability();
+    if (availability != 'available') {
+      onEvent?.call('open: NFC adapter not available ($availability)');
+      throw const TagLinkException('nfc_disabled');
     }
-    NFCTag? polled;
+    // Reader mode stays registered with the native layer for the whole
+    // app lifetime; this idempotent call only guarantees it is active.
+    await transport.enable();
+    final String? rawUid;
     try {
-      polled = await FlutterNfcKit.poll(
-        timeout: timeout,
-        androidCheckNDEF: false, // raw block access only — skip NDEF parse
-        iosAlertMessage: iosAlertMessage,
-      );
+      rawUid = await transport.poll(timeout);
+    } on TagLinkException catch (e) {
+      if (e.message == 'not_iso15693') {
+        onEvent?.call('poll: tag is not ISO 15693 (NFC Type 5 required)');
+      }
+      rethrow;
     } catch (_) {
       // poll timed out or was cancelled by the platform
       return null;
     }
-    if (polled.type != NFCTagType.iso15693) {
-      try {
-        await FlutterNfcKit.finish(
-          iosErrorMessage: 'برچسب سازگار نیست (NFC Type 5 / ISO 15693 لازم است)',
-        );
-      } catch (_) {
-        // session already closed by the platform
-      }
-      onEvent?.call('poll: tag type ${polled.type} is not ISO 15693');
-      throw const TagLinkException('not_iso15693');
+    if (rawUid == null || rawUid.isEmpty) {
+      onEvent?.call('poll: no tag presented within the timeout');
+      return null;
     }
-    final info = await _readSystemInfo(polled, onEvent);
-    final link = Iso15693TagLink._(polled, info, onEvent: onEvent);
+    final link = Iso15693TagLink._(rawUid, onEvent: onEvent);
     link._open = true;
+    link._info = await link._readSystemInfo();
 
     // Addressing self-check (field hardening): a tag that does not
     // implement the ST extended command family answers ISO error
@@ -345,13 +347,13 @@ class Iso15693TagLink implements TagLink {
   ///     extended command family (0x30/0x31/0x33).
   ///  3. IC_REF profile: 26h ⇒ ST25DV16K/64K family ⇒ 512 × 4 B;
   ///     24h ⇒ ST25DV04K ⇒ 128 × 4 B; unknown ⇒ target geometry.
-  static Future<TagSystemInfo> _readSystemInfo(
-      NFCTag tag, void Function(String event)? onEvent) async {
+  Future<TagSystemInfo> _readSystemInfo() async {
+    final onEvent = _onEvent;
     TagSystemInfo? identity;
     // 1) STANDARD Get System Info — no request parameters.
     try {
-      final resp = await FlutterNfcKit.transceive<Uint8List>(
-        Uint8List.fromList([_flagDataRateHigh, _cmdGetSystemInfo]),
+      final resp = await NativeNfcTransport.instance.transceive(
+        [_flagDataRateHigh, _cmdGetSystemInfo],
       );
       identity = parseSystemInfoFrame(resp);
       if (identity != null && identity.known) {
@@ -370,9 +372,8 @@ class Iso15693TagLink implements TagLink {
     //    VICC memory size (Table 162).
     TagSystemInfo? ext;
     try {
-      final resp = await FlutterNfcKit.transceive<Uint8List>(
-        Uint8List.fromList([_flagDataRateHigh, _cmdExtGetSystemInfo,
-            _extSysInfoRequestMemorySize]),
+      final resp = await NativeNfcTransport.instance.transceive(
+        [_flagDataRateHigh, _cmdExtGetSystemInfo, _extSysInfoRequestMemorySize],
       );
       ext = parseSystemInfoFrame(resp);
       if (ext != null && ext.known) {
@@ -533,12 +534,13 @@ class Iso15693TagLink implements TagLink {
   Future<Uint8List> _transceive(List<int> frame, String what) async {
     Uint8List resp;
     try {
-      resp = await FlutterNfcKit.transceive<Uint8List>(
-        Uint8List.fromList(frame),
-      );
-    } catch (e) {
+      resp = await NativeNfcTransport.instance.transceive(frame);
+    } on PlatformException catch (e) {
       // RF field lost / I/O error — mapped to a link exception with no
       // error code (treated as transient by the retry policy).
+      _event('tx $what failed: ${e.code} ${e.message ?? ''}');
+      throw TagLinkException('io_${what}_error:${e.code}');
+    } catch (e) {
       _event('tx $what failed: $e');
       throw TagLinkException('io_${what}_error:$e');
     }
@@ -677,8 +679,11 @@ class Iso15693TagLink implements TagLink {
   Future<void> close() async {
     if (!_open) return;
     _open = false;
+    // Closes the NfcV session only — the native reader mode stays active
+    // for the app lifetime, so the tag is never handed back to the
+    // system dispatch (v4.3: no more browser hijack between sessions).
     try {
-      await FlutterNfcKit.finish();
+      await NativeNfcTransport.instance.finish();
     } catch (_) {
       // session already closed by the platform
     }
@@ -691,7 +696,10 @@ class FakeTagLink implements TagLink {
     int totalBlocks = 512,
     int blockSize = 4,
     int icRef = 0x26,
-    String uid = '04:11:22:33:44:55:66',
+    // v4.3 — the default identity models the production ST25DV16KC
+    // (human-order UID of the field-test tag), so the protocol step-1
+    // UID-signature check passes exactly like on the real hardware.
+    String uid = 'E0:02:26:00:D7:AD:24:AF',
   })  : _image = List<Uint8List>.generate(
             totalBlocks, (_) => Uint8List(blockSize)),
         _totalBlocks = totalBlocks,

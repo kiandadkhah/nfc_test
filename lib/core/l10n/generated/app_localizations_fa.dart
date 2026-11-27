@@ -1650,4 +1650,90 @@ class AppLocalizationsFa extends AppLocalizations {
 
   @override
   String get gpsPhonePos => 'موقعیت فعلی گوشی';
+
+  @override
+  String get ruleOk => 'متوجه شدم';
+
+  @override
+  String get rulePopupIntro =>
+      'پیام‌های زیر بر اساس قواعد تعریف‌شده صادر شده‌اند؛ پس از اصلاح می‌توانید ادامه دهید.';
+
+  @override
+  String get idLinkInvalidTitle => 'لینک تگ معتبر نیست';
+
+  @override
+  String idLinkInvalidText(String uri) {
+    return 'محتوای NDEF تگ «$uri» است؛ این مقدار هیچ‌یک از لینک‌های تعریف‌شده KIANEX نیست و تگ به‌عنوان دستگاه PTS50 پذیرفته نمی‌شود.';
+  }
+
+  @override
+  String get idModelUnsupportedTitle => 'تگ شناسایی شد — مدل پشتیبانی نمی‌شود';
+
+  @override
+  String idModelUnsupportedText(String model, String supported) {
+    return 'مدل دستگاه «$model» از روی لینک تگ شناسایی شد؛ این نسخه اپلیکیشن فقط دستگاه $supported را پشتیبانی می‌کند.';
+  }
+
+  @override
+  String get idUidWarnTitle => 'امضای UID همخوان نیست';
+
+  @override
+  String get idUidWarnText =>
+      'شناسه UID تگ امضای پردازنده ST25DV16KC (شروع با E0 02 26) را ندارد؛ تگ ممکن است سخت‌افزار مورد انتظار نباشد.';
+
+  @override
+  String get idLinkModel => 'مدل استخراج‌شده از لینک';
+
+  @override
+  String get mapIrFallback =>
+      'سرویس نقشه map.ir پاسخ نمی‌دهد؛ نمایش نقشه به‌صورت موقت به کاشی‌های OpenStreetMap تغییر کرد.';
+
+  @override
+  String get progRuleTitle => 'قواعد برنامه‌ها';
+
+  @override
+  String progRulesBlock(String n) {
+    return 'ثبت برنامه انجام نشد: $n مورد نقض قواعد برنامه‌ها میان برنامه‌های فعال وجود دارد.';
+  }
+
+  @override
+  String progP1(String a, String b) {
+    return 'بیش از یک برنامه با چرخه روزانه نمی‌توانید فعال داشته باشید. برنامه‌های «$a» و «$b» هر دو روزانه‌اند؛ جایگاه چرخه روزانه در حافظه تگ فقط یک زنجیره را می‌پذیرد.';
+  }
+
+  @override
+  String progP2(String a, String b, String days) {
+    return 'برنامه‌های هفتگی «$a» و «$b» هر دو به روزهای مشترک «$days» اختصاص یافته‌اند. هر جایگاه روز هفته فقط یک زنجیره را می‌پذیرد؛ روزهای یکی از برنامه‌ها را کم کنید یا آن را غیرفعال نمایید.';
+  }
+
+  @override
+  String progP3(String a, String b, String days) {
+    return 'برنامه‌های ماهانه «$a» و «$b» هر دو به روزهای مشترک ماه «$days» اختصاص یافته‌اند. هر جایگاه روز ماه فقط یک زنجیره را می‌پذیرد؛ روزهای یکی از برنامه‌ها را کم کنید یا آن را غیرفعال نمایید.';
+  }
+
+  @override
+  String progP4(String a, String b, String days) {
+    return 'برنامه‌های سالانه «$a» و «$b» هر دو به تاریخ‌های مشترک سال «$days» اختصاص یافته‌اند. هر جایگاه روز سال فقط یک زنجیره را می‌پذیرد؛ تاریخ‌های یکی از برنامه‌ها را کم کنید یا آن را غیرفعال نمایید.';
+  }
+
+  @override
+  String progP5(String a, String b) {
+    return 'برنامه روزانه «$a» هم‌زمان با «$b» فعال است. طبق اولویت چرخه‌ها (سالانه > ماهانه > هفتگی > روزانه) در روزهای تعیین‌شده آن برنامه‌ها، زنجیره روزانه اجرا نمی‌شود.';
+  }
+
+  @override
+  String get wpFailPayload =>
+      'نوشتن برنامه‌ها روی حافظه تگ تأیید نشد: بلوک‌ها پس از نوشتن بازخوانی شدند و مغایرت باقی ماند. گوشی را ثابت روی دستگاه نگه دارید و دوباره تلاش کنید؛ شماره بلوک مغایر در گزارش ثبت شده است.';
+
+  @override
+  String get wpFailNoPrograms =>
+      'هیچ برنامه فعالی برای ارسال وجود ندارد. حداقل یک برنامه را فعال کنید یا گزینه «فقط تنظیمات» را انتخاب کنید.';
+
+  @override
+  String get wpFailModel =>
+      'لینک تگ آدرس رسمی PTS50R1 نیست یا مدل شناسایی‌شده پشتیبانی نمی‌شود. انتقال فقط روی تگ اصلی PTS50R1 انجام می‌شود.';
+
+  @override
+  String get wpFailUid =>
+      'امضای UID تگ با ST25DV16KC همخوان نیست — انتقال متوقف شد.';
 }

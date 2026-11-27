@@ -2978,6 +2978,132 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Phone position'**
   String get gpsPhonePos;
+
+  /// No description provided for @ruleOk.
+  ///
+  /// In en, this message translates to:
+  /// **'Got it'**
+  String get ruleOk;
+
+  /// No description provided for @rulePopupIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'The messages below are raised by the defined rules; after the correction you can continue.'**
+  String get rulePopupIntro;
+
+  /// No description provided for @idLinkInvalidTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Tag link is not valid'**
+  String get idLinkInvalidTitle;
+
+  /// No description provided for @idLinkInvalidText.
+  ///
+  /// In en, this message translates to:
+  /// **'The NDEF content of the tag is “{uri}”; this value matches none of the defined KIANEX product links, so the tag is NOT accepted as a PTS50 device.'**
+  String idLinkInvalidText(String uri);
+
+  /// No description provided for @idModelUnsupportedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Tag recognized — model not supported'**
+  String get idModelUnsupportedTitle;
+
+  /// No description provided for @idModelUnsupportedText.
+  ///
+  /// In en, this message translates to:
+  /// **'The device model “{model}” was decoded from the tag link; this app build only programs {supported}.'**
+  String idModelUnsupportedText(String model, String supported);
+
+  /// No description provided for @idUidWarnTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'UID signature mismatch'**
+  String get idUidWarnTitle;
+
+  /// No description provided for @idUidWarnText.
+  ///
+  /// In en, this message translates to:
+  /// **'The tag UID does not carry the ST25DV16KC processor signature (prefix E0 02 26); the tag may not be the expected hardware.'**
+  String get idUidWarnText;
+
+  /// No description provided for @idLinkModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Model decoded from the link'**
+  String get idLinkModel;
+
+  /// No description provided for @mapIrFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'The map.ir service is not responding; the map temporarily falls back to OpenStreetMap tiles.'**
+  String get mapIrFallback;
+
+  /// No description provided for @progRuleTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Program rules'**
+  String get progRuleTitle;
+
+  /// No description provided for @progRulesBlock.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving is blocked: {n} program-rule conflict(s) exist between the enabled programs.'**
+  String progRulesBlock(String n);
+
+  /// No description provided for @progP1.
+  ///
+  /// In en, this message translates to:
+  /// **'Only ONE daily program can stay enabled. “{a}” and “{b}” are both daily — the daily slot of the tag memory accepts a single chain.'**
+  String progP1(String a, String b);
+
+  /// No description provided for @progP2.
+  ///
+  /// In en, this message translates to:
+  /// **'The weekly programs “{a}” and “{b}” are both assigned to the same weekdays ({days}). Each weekday slot holds exactly one chain — shorten the days of one program or disable it.'**
+  String progP2(String a, String b, String days);
+
+  /// No description provided for @progP3.
+  ///
+  /// In en, this message translates to:
+  /// **'The monthly programs “{a}” and “{b}” are both assigned to the same month days ({days}). Each month-day slot holds exactly one chain — shorten the days of one program or disable it.'**
+  String progP3(String a, String b, String days);
+
+  /// No description provided for @progP4.
+  ///
+  /// In en, this message translates to:
+  /// **'The annual programs “{a}” and “{b}” are both assigned to the same dates of the year ({days}). Each year-day slot holds exactly one chain — shorten the dates of one program or disable it.'**
+  String progP4(String a, String b, String days);
+
+  /// No description provided for @progP5.
+  ///
+  /// In en, this message translates to:
+  /// **'The daily program “{a}” runs together with “{b}”. Per the cycle priority (annual > monthly > weekly > daily) the daily chain does NOT run on the days those programs claim.'**
+  String progP5(String a, String b);
+
+  /// No description provided for @wpFailPayload.
+  ///
+  /// In en, this message translates to:
+  /// **'Writing the programs to the tag memory failed verification: the blocks were read back and a mismatch remained. Keep the phone steady on the device and try again; the log holds the failing block number.'**
+  String get wpFailPayload;
+
+  /// No description provided for @wpFailNoPrograms.
+  ///
+  /// In en, this message translates to:
+  /// **'No enabled program exists to transfer. Enable at least one program (or choose «Settings only»).'**
+  String get wpFailNoPrograms;
+
+  /// No description provided for @wpFailModel.
+  ///
+  /// In en, this message translates to:
+  /// **'The tag link is not the whitelisted PTS50R1 product URL, or the recognized model is not supported. The transfer only runs on an original PTS50R1 tag.'**
+  String get wpFailModel;
+
+  /// No description provided for @wpFailUid.
+  ///
+  /// In en, this message translates to:
+  /// **'The tag UID does not carry the ST25DV16KC signature — the transfer was stopped.'**
+  String get wpFailUid;
 }
 
 class _AppLocalizationsDelegate

@@ -1656,4 +1656,90 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get gpsPhonePos => 'Phone position';
+
+  @override
+  String get ruleOk => 'Got it';
+
+  @override
+  String get rulePopupIntro =>
+      'The messages below are raised by the defined rules; after the correction you can continue.';
+
+  @override
+  String get idLinkInvalidTitle => 'Tag link is not valid';
+
+  @override
+  String idLinkInvalidText(String uri) {
+    return 'The NDEF content of the tag is “$uri”; this value matches none of the defined KIANEX product links, so the tag is NOT accepted as a PTS50 device.';
+  }
+
+  @override
+  String get idModelUnsupportedTitle => 'Tag recognized — model not supported';
+
+  @override
+  String idModelUnsupportedText(String model, String supported) {
+    return 'The device model “$model” was decoded from the tag link; this app build only programs $supported.';
+  }
+
+  @override
+  String get idUidWarnTitle => 'UID signature mismatch';
+
+  @override
+  String get idUidWarnText =>
+      'The tag UID does not carry the ST25DV16KC processor signature (prefix E0 02 26); the tag may not be the expected hardware.';
+
+  @override
+  String get idLinkModel => 'Model decoded from the link';
+
+  @override
+  String get mapIrFallback =>
+      'The map.ir service is not responding; the map temporarily falls back to OpenStreetMap tiles.';
+
+  @override
+  String get progRuleTitle => 'Program rules';
+
+  @override
+  String progRulesBlock(String n) {
+    return 'Saving is blocked: $n program-rule conflict(s) exist between the enabled programs.';
+  }
+
+  @override
+  String progP1(String a, String b) {
+    return 'Only ONE daily program can stay enabled. “$a” and “$b” are both daily — the daily slot of the tag memory accepts a single chain.';
+  }
+
+  @override
+  String progP2(String a, String b, String days) {
+    return 'The weekly programs “$a” and “$b” are both assigned to the same weekdays ($days). Each weekday slot holds exactly one chain — shorten the days of one program or disable it.';
+  }
+
+  @override
+  String progP3(String a, String b, String days) {
+    return 'The monthly programs “$a” and “$b” are both assigned to the same month days ($days). Each month-day slot holds exactly one chain — shorten the days of one program or disable it.';
+  }
+
+  @override
+  String progP4(String a, String b, String days) {
+    return 'The annual programs “$a” and “$b” are both assigned to the same dates of the year ($days). Each year-day slot holds exactly one chain — shorten the dates of one program or disable it.';
+  }
+
+  @override
+  String progP5(String a, String b) {
+    return 'The daily program “$a” runs together with “$b”. Per the cycle priority (annual > monthly > weekly > daily) the daily chain does NOT run on the days those programs claim.';
+  }
+
+  @override
+  String get wpFailPayload =>
+      'Writing the programs to the tag memory failed verification: the blocks were read back and a mismatch remained. Keep the phone steady on the device and try again; the log holds the failing block number.';
+
+  @override
+  String get wpFailNoPrograms =>
+      'No enabled program exists to transfer. Enable at least one program (or choose «Settings only»).';
+
+  @override
+  String get wpFailModel =>
+      'The tag link is not the whitelisted PTS50R1 product URL, or the recognized model is not supported. The transfer only runs on an original PTS50R1 tag.';
+
+  @override
+  String get wpFailUid =>
+      'The tag UID does not carry the ST25DV16KC signature — the transfer was stopped.';
 }

@@ -17,7 +17,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../logging/app_logger.dart';
@@ -27,6 +26,20 @@ import '../widgets/app_toasts.dart';
 /// Native bridge for the system screens Flutter cannot reach directly
 /// (the Android NFC settings panel). Implemented in MainActivity.kt.
 const MethodChannel _systemChannel = MethodChannel('kianex/system');
+
+/// v4.3 — NFC adapter state comes from the same native layer that owns the
+/// reader mode (the `kianex/nfc` channel), so the gate and the transport
+/// always see the same state. 'available' | 'disabled' | 'not_supported'.
+Future<String> nfcAdapterState() async {
+  try {
+    final r = await const MethodChannel('kianex/nfc').invokeMethod<String>('availability');
+    return r ?? 'not_supported';
+  } catch (_) {
+    // native channel unavailable (unit tests) — assume supported-but-off
+    // so the user can still reach the settings screen
+    return 'not_supported';
+  }
+}
 
 /// NFC/Location readiness snapshot shown on the home screen.
 class SystemReadiness {
@@ -50,9 +63,9 @@ Future<SystemReadiness> readSystemReadiness() async {
   var nfcSupported = false;
   var nfcEnabled = false;
   try {
-    final a = await FlutterNfcKit.nfcAvailability;
-    nfcSupported = a != NFCAvailability.not_supported;
-    nfcEnabled = a == NFCAvailability.available;
+    final state = await nfcAdapterState();
+    nfcSupported = state != 'not_supported';
+    nfcEnabled = state == 'available';
   } catch (_) {
     // detection unavailable — treat as supported-but-off so the user can
     // still reach the settings screen
@@ -81,6 +94,17 @@ Future<SystemReadiness> readSystemReadiness() async {
 Future<void> openNfcSettings() async {
   try {
     await _systemChannel.invokeMethod<void>('openNfcSettings');
+  } catch (_) {
+    // platform channel unavailable — nothing else to try
+  }
+}
+
+/// v4.3 — keeps the screen awake during a transfer (a screen-off would
+/// release the NFC reader mode and kill the tag session mid-protocol).
+/// Silently ignored wherever the native channel is unavailable.
+Future<void> setKeepScreenOn(bool on) async {
+  try {
+    await _systemChannel.invokeMethod<void>('setKeepScreenOn', {'on': on});
   } catch (_) {
     // platform channel unavailable — nothing else to try
   }
@@ -158,15 +182,15 @@ Future<void> runStartupGate(BuildContext context) async {
   } catch (e) {
     logger.gps('startup gate: service check failed: $e');
   }
-  if (!serviceOn) {
-    await _guide(
-      context,
-      title: L(context).gateLocServiceTitle,
-      text: L(context).gateLocServiceText,
-      actionLabel: L(context).gateGoSettings,
-      open: () async => Geolocator.openLocationSettings(),
-    );
-  }
+  if (serviceOn) return;
+  if (!context.mounted) return;
+  await _guide(
+    context,
+    title: L(context).gateLocServiceTitle,
+    text: L(context).gateLocServiceText,
+    actionLabel: L(context).gateGoSettings,
+    open: () async => Geolocator.openLocationSettings(),
+  );
 }
 
 /// Reusable guidance dialog → system screen.

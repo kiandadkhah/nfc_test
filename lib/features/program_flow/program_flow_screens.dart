@@ -8,7 +8,9 @@ import '../../core/solar/solar_events.dart';
 import '../../core/state/app_providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
+import '../../core/utils/jalali.dart';
 import '../../core/validation/validators.dart';
+import '../../core/widgets/rule_popup.dart';
 import '../../state/providers.dart';
 import '../../core/widgets/app_toasts.dart';
 
@@ -57,6 +59,37 @@ String phaseDurationText(AppLocalizationsX l, bool fa, TimerPhase phase) {
   if (h > 0 && r > 0) return l.minFmt(faNumInt(fa, h), faNumInt(fa, r));
   if (h > 0) return l.hourFmt(faNumInt(fa, h));
   return l.minOnlyFmt(faNumInt(fa, r));
+}
+
+/// Formal text of one program-rule violation (P-01..P-05) — the popup
+/// and the banners share the same wording. [year] is the current Jalali
+/// year used to decode annual day-of-year numbers into real dates.
+String programViolationText(
+  AppLocalizationsX l,
+  bool fa,
+  ProgramViolation v, {
+  required int year,
+}) {
+  final weekNames = [l.w0, l.w1, l.w2, l.w3, l.w4, l.w5, l.w6];
+  final monthNames = [l.m0, l.m1, l.m2, l.m3, l.m4, l.m5, l.m6, l.m7, l.m8, l.m9, l.m10, l.m11];
+  final daysText = switch (v.rule) {
+    ProgramRule.weeklyOverlap => v.days.map((d) => weekNames[d.clamp(0, 6)]).join('، '),
+    ProgramRule.monthlyOverlap => v.days.map((d) => faNumInt(fa, d)).join('، '),
+    ProgramRule.annualOverlap => v.days
+        .map((d) {
+          final (m, day) = jalaliFromDayOfYear(year, d);
+          return '${faNumInt(fa, day)} ${monthNames[m - 1]}';
+        })
+        .join('، '),
+    _ => '',
+  };
+  return switch (v.rule) {
+    ProgramRule.duplicateDaily => l.progP1(v.a, v.b),
+    ProgramRule.weeklyOverlap => l.progP2(v.a, v.b, daysText),
+    ProgramRule.monthlyOverlap => l.progP3(v.a, v.b, daysText),
+    ProgramRule.annualOverlap => l.progP4(v.a, v.b, daysText),
+    ProgramRule.dailyShadowed => l.progP5(v.a, v.b),
+  };
 }
 
 /// Step 2 — cycle selection.
@@ -222,22 +255,22 @@ class ChainScreen extends ConsumerWidget {
       longitude: settings.gpsLng,
       utcOffsetHours: settings.utcOffsetHours,
     );
-    final capacityOk = eventCapacityOk(
-      programs.programs,
-      draftEvents: draft.events,
-      replacingId: programs.draftEditIndex >= 0 &&
-              programs.draftEditIndex < programs.programs.length
-          ? programs.programs[programs.draftEditIndex].id
-          : -1,
-    );
+    // v4.3 — current Jalali year for the annual day decoding of the
+    // program-rule texts.
+    final jalaliYear = gregorianToJalali(DateTime.now()).year;
+    // v4.3 — program rules (P-01..P-05) evaluated against the SAVED list
+    // with the draft replacing the edited program: one chain per day slot.
+    final programViolations = programs.draftProgramViolations();
+    final blockingProgramViolations =
+        programViolations.where((v) => v.blocking).toList();
+    final advisoryProgramViolations =
+        programViolations.where((v) => !v.blocking).toList();
     // Date rule: non-daily cycles must have at least one assigned day,
     // otherwise saving stays disabled. [Q-10]
     final assignCount = draft.assign.weekly.length +
         draft.assign.monthly.length +
         draft.assign.annualDays.length;
     final needsDays = draft.cycle != CycleType.daily && assignCount == 0;
-    final canSave =
-        draft.events.isNotEmpty && violations.isEmpty && capacityOk && !needsDays;
 
     return Scaffold(
       appBar: AppBar(
@@ -291,6 +324,41 @@ class ChainScreen extends ConsumerWidget {
                 ),
               ),
           ],
+          // v4.3 — program-rule banners: blocking (red) and the advisory
+          // daily-shadowing notice (amber). The same texts appear in the
+          // «متوجه شدم» popup when the save is attempted.
+          if (blockingProgramViolations.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _banner(
+              context,
+              color: const Color(0xFFC0392B),
+              icon: Icons.rule_outlined,
+              text: l.progRulesBlock(faNumInt(fa, blockingProgramViolations.length)),
+            ),
+            const SizedBox(height: 6),
+            for (final v in blockingProgramViolations)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _banner(
+                  context,
+                  color: const Color(0xFFC0392B),
+                  icon: Icons.warning_amber_rounded,
+                  text: programViolationText(l, fa, v, year: jalaliYear),
+                ),
+              ),
+          ],
+          if (advisoryProgramViolations.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 6),
+              child: _banner(
+                context,
+                color: const Color(0xFFB4570A),
+                icon: Icons.info_outline,
+                text: programViolationText(
+                    l, fa, advisoryProgramViolations.first,
+                    year: jalaliYear),
+              ),
+            ),
           const SizedBox(height: 10),
           _rulesCard(context, l, fa),
           if (draft.cycle == CycleType.daily) ...[
@@ -355,23 +423,9 @@ class ChainScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 10),
           FilledButton(
-            onPressed: canSave
-                ? () {
-                    final ok = ref.read(programsProvider).saveDraft();
-                    if (!ok) {
-                      showAppMessage(
-                        context,
-                        violations.isNotEmpty
-                            ? l.rulesBlock(faNumInt(fa, violations.length))
-                            : l.capacityBlock,
-                        isError: true,
-                      );
-                      return;
-                    }
-                    showAppMessage(context, l.programSaved(draft.name));
-                    context.go('/home');
-                  }
-                : null,
+            // v4.3 — the button stays tappable so a blocked save opens the
+            // rule POPUP with «متوجه شدم» instead of a silent dead button.
+            onPressed: () => _saveDraft(context, ref, l, fa),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -412,6 +466,67 @@ class ChainScreen extends ConsumerWidget {
         CycleType.monthly => l.monthly,
         CycleType.annual => l.annual,
       };
+
+  /// v4.3 save flow — chain rules and program rules open as POPUPS with
+  /// «متوجه شدم»; only a fully valid draft is persisted.
+  Future<void> _saveDraft(
+    BuildContext context,
+    WidgetRef ref,
+    AppLocalizationsX l,
+    bool fa,
+  ) async {
+    final programs = ref.read(programsProvider);
+    final draft = programs.draft;
+    if (draft == null || draft.events.isEmpty) {
+      showAppMessage(context, l.capacityBlock, isError: true);
+      return;
+    }
+    final chainViolations = chainRuleViolations(draft.events);
+    if (chainViolations.isNotEmpty) {
+      await showRuleViolationPopup(
+        context,
+        title: l.ruleTitle,
+        messages: [
+          for (final v in chainViolations) violationText(l, fa, v, draft.events),
+        ],
+      );
+      return;
+    }
+    final programViolations = programs.draftProgramViolations();
+    final blocking = programViolations.where((v) => v.blocking).toList();
+    if (blocking.isNotEmpty) {
+      final year = gregorianToJalali(DateTime.now()).year;
+      await showRuleViolationPopup(
+        context,
+        title: l.progRuleTitle,
+        messages: [
+          for (final v in blocking) programViolationText(l, fa, v, year: year),
+        ],
+      );
+      return;
+    }
+    final advisory = programViolations.where((v) => !v.blocking).toList();
+    if (advisory.isNotEmpty) {
+      // P-05 — informational, requires an explicit acknowledgement.
+      final year = gregorianToJalali(DateTime.now()).year;
+      await showRuleViolationPopup(
+        context,
+        title: l.progRuleTitle,
+        messages: [
+          for (final v in advisory) programViolationText(l, fa, v, year: year),
+        ],
+      );
+    }
+    final ok = programs.saveDraft();
+    if (!ok || !context.mounted) {
+      if (context.mounted) {
+        showAppMessage(context, l.capacityBlock, isError: true);
+      }
+      return;
+    }
+    showAppMessage(context, l.programSaved(draft.name));
+    context.go('/home');
+  }
 
   String _assignSummary(AppLocalizationsX l, bool fa, Program draft) {
     final a = draft.assign;

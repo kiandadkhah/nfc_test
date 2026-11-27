@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../core/map/map_tiles.dart';
 import '../../core/state/app_providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
@@ -13,11 +14,17 @@ import '../../core/widgets/app_toasts.dart';
 import '../../state/providers.dart';
 
 /// Location settings — the real GPS position of the relay is the basis for
-/// the solar (Chebyshev) coefficients. v4.1: the position is shown on a
-/// REAL map and manual entry is marker picking on the same map (the fake
-/// grid painter and the numeric-only dialog are removed). If the phone's
-/// location service is off or the permission is missing, the user is
-/// guided straight into the matching system settings screen.
+/// the solar (Chebyshev) coefficients. The position is shown on a REAL map
+/// and manual entry is marker picking on the same map.
+///
+/// v4.3 fixes of the field report:
+///  · the tiles come from the Iranian map.ir service (fast inside Iran),
+///    with an automatic OpenStreetMap fallback;
+///  · the map camera FOLLOWS the marker — a fresh GPS fix moves both, so
+///    the marker can no longer sit in another city than the visible tiles
+///    («مکان نما در مشهد ولی تصویر اصفهان»);
+///  · the map picker's GPS button fetches the REAL current position and
+///    re-centers both the camera and the marker.
 class GpsScreen extends ConsumerStatefulWidget {
   const GpsScreen({super.key});
 
@@ -26,22 +33,34 @@ class GpsScreen extends ConsumerStatefulWidget {
 }
 
 class _GpsScreenState extends ConsumerState<GpsScreen> {
+  final MapController _mapController = MapController();
   bool _fixing = false;
-  bool _tilesFailed = false;
   double? _lastAccuracy;
+  double? _cameraLat;
+  double? _cameraLng;
 
-  /// Set by [TileLayer.errorTileCallback] when a tile request fails —
-  /// normally the missing INTERNET permission (fixed in v4.2) or a
-  /// data connection problem; the UI then explains instead of staying
-  /// silently grey (v4.1.0 field report: «صفحه طوسی رنگ»). Safe to call
-  /// during build: the setState is deferred to a microtask.
-  void _noteTileFailure() {
-    if (_tilesFailed) return;
-    _tilesFailed = true;
-    scheduleMicrotask(() {
-      if (mounted) setState(() {});
+  /// Keeps the map camera glued to the marker — called whenever the stored
+  /// device location changes (fresh GPS fix or a picked point), so the
+  /// marker is always inside the visible map area.
+  void _followMarker(LatLng point) {
+    final same =
+        _cameraLat != null && _cameraLng != null &&
+            (point.latitude - _cameraLat!).abs() < 1e-9 &&
+            (point.longitude - _cameraLng!).abs() < 1e-9;
+    if (same) return;
+    _cameraLat = point.latitude;
+    _cameraLng = point.longitude;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        _mapController.move(point, _zoomOf(point));
+      } catch (_) {
+        // controller not attached yet — the initialCenter already matches
+      }
     });
   }
+
+  double _zoomOf(LatLng point) => 12;
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +68,12 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
     final fa = isFa(context);
     final settings = ref.watch(settingsProvider);
     final latLng = LatLng(settings.gpsLat, settings.gpsLng);
+    // v4.3 — the camera follows every location change (GPS fix / pick).
+    ref.listen(settingsProvider, (_, __) {
+      final s = ref.read(settingsProvider);
+      _followMarker(LatLng(s.gpsLat, s.gpsLng));
+    });
+    _followMarker(latLng);
 
     return Scaffold(
       appBar: AppBar(title: Text(l.gpsTitle)),
@@ -65,38 +90,22 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
               child: Stack(
                 children: [
                   FlutterMap(
+                    mapController: _mapController,
                     options: MapOptions(
                       initialCenter: latLng,
-                      initialZoom: 11,
+                      initialZoom: _zoomOf(latLng),
                       interactionOptions: const InteractionOptions(
                         flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
                       ),
                     ),
                     children: [
-                      TileLayer(
-                        urlTemplate:
-                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'ir.kianex.kianex_pts50n1_app',
-                        errorTileCallback: (_, __, ___) => _noteTileFailure(),
+                      KianexTileLayer(
+                        onSourceFellBack: () {
+                          if (mounted) {
+                            showAppMessage(context, l.mapIrFallback, isError: true);
+                          }
+                        },
                       ),
-                      if (_tilesFailed)
-                        Positioned(
-                          top: 8,
-                          left: 10,
-                          right: 10,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.78),
-                              borderRadius: BorderRadius.circular(99),
-                            ),
-                            child: Text(l.mapOffline,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                    fontSize: 10, color: Color(0xFFFFD7A8))),
-                          ),
-                        ),
                       MarkerLayer(
                         markers: [
                           Marker(
@@ -206,8 +215,9 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
 
   /// Real GPS fix — requests the location permission, reads the current
   /// position of the phone (the phone is mounted on/near the relay) and
-  /// persists it for the solar coefficients. When the service is off or
-  /// the permission was denied, the user is guided to the matching
+  /// persists it for the solar coefficients. The map follows the new
+  /// marker through [ref.listen] → [_followMarker]. When the service is
+  /// off or the permission was denied, the user is guided to the matching
   /// system-settings screen. [v4.1 field report]
   Future<void> _getRealFix(AppLocalizationsX l) async {
     final logger = ref.read(appLoggerProvider);
@@ -341,6 +351,11 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
 
 /// Full-screen map picker — tap moves the marker, «تأیید» returns the
 /// picked coordinates.
+///
+/// v4.3: the GPS button now fetches the REAL current position of the phone
+/// (permission + service checks included) and re-centers both the camera
+/// and the marker — the old button only jumped back to the stale opening
+/// point, so «دریافت موقعیت با GPS» never showed the current coordinates.
 class MapPickerScreen extends StatefulWidget {
   const MapPickerScreen({required this.initial, super.key});
 
@@ -353,14 +368,41 @@ class MapPickerScreen extends StatefulWidget {
 class _MapPickerScreenState extends State<MapPickerScreen> {
   late LatLng _picked = widget.initial;
   late final MapController _controller = MapController();
-  bool _tilesFailed = false;
+  bool _fixing = false;
 
-  void _noteTileFailure() {
-    if (_tilesFailed) return;
-    _tilesFailed = true;
-    scheduleMicrotask(() {
-      if (mounted) setState(() {});
-    });
+  Future<void> _usePhoneGps(AppLocalizationsX l) async {
+    if (_fixing) return;
+    setState(() => _fixing = true);
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) showAppMessage(context, l.gpsTimeout, isError: true);
+        return;
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (mounted) showAppMessage(context, l.gpsTimeout, isError: true);
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.best,
+          timeLimit: Duration(seconds: 20),
+        ),
+      );
+      if (!mounted) return;
+      final here = LatLng(pos.latitude, pos.longitude);
+      _controller.move(here, 14);
+      setState(() => _picked = here);
+    } catch (_) {
+      if (mounted) showAppMessage(context, l.gpsTimeout, isError: true);
+    } finally {
+      if (mounted) setState(() => _fixing = false);
+    }
   }
 
   @override
@@ -384,11 +426,12 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                     ),
                   ),
                   children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'ir.kianex.kianex_pts50n1_app',
-                      errorTileCallback: (_, __, ___) => _noteTileFailure(),
+                    KianexTileLayer(
+                      onSourceFellBack: () {
+                        if (mounted) {
+                          showAppMessage(context, l.mapIrFallback, isError: true);
+                        }
+                      },
                     ),
                     MarkerLayer(
                       markers: [
@@ -403,24 +446,17 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                     ),
                   ],
                 ),
-                if (_tilesFailed)
-                  Positioned(
-                    top: 8,
-                    left: 10,
-                    right: 10,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.78),
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                      child: Text(l.mapOffline,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontSize: 10, color: Color(0xFFFFD7A8))),
-                    ),
-                  ),
+                Positioned(
+                  top: 8,
+                  left: 10,
+                  child: _fixing
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2.4),
+                        )
+                      : const SizedBox.shrink(),
+                ),
               ],
             ),
           ),
@@ -461,11 +497,13 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: () {
-                            _controller.move(widget.initial, 12);
-                            setState(() => _picked = widget.initial);
-                          },
-                          icon: const Icon(Icons.my_location, size: 17),
+                          onPressed: _fixing ? null : () => _usePhoneGps(l),
+                          icon: _fixing
+                              ? const SizedBox(
+                                  width: 15,
+                                  height: 15,
+                                  child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.my_location, size: 17),
                           label: Text(l.gpsPhonePos),
                         ),
                       ),
