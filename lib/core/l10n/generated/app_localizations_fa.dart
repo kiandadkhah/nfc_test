@@ -1475,15 +1475,22 @@ class AppLocalizationsFa extends AppLocalizations {
   String get gpsTimeout => 'دریافت موقعیت ناموفق بود؛ چند لحظه دیگر تلاش کنید.';
 
   @override
+  String get mapOffline =>
+      'نمایش نقشه به اینترنت نیاز دارد؛ اتصال اینترنت گوشی را بررسی کنید.';
+
+  @override
   String get idModelWarnTitle => 'تگ شناسایی شد — مدل تطبیق نشد';
 
   @override
   String get idModelWarnText =>
-      'محتوای NDEF تگ با شناسه‌های KIANEX تطبیق ندارد؛ ممکن است تگ مربوط به دستگاه PST50R1 کارخانه نباشد. پیام NDEF در زیر نمایش داده شده است.';
+      'محتوای NDEF تگ با شناسه‌های KIANEX تطبیق ندارد؛ ممکن است تگ مربوط به دستگاه PTS50R1 کارخانه نباشد. پیام NDEF در زیر نمایش داده شده است.';
+
+  @override
+  String get idMemoryWarnTitle => 'تگ شناسایی شد — ظرفیت حافظه ناکافی';
 
   @override
   String get idMemoryWarnText =>
-      'ظرفیت حافظه تگ برای نگاشت حافظه اشتراکی PST50R1 کافی نیست؛ تگ ST25DV16K (۵۱۲ بلوک) یا بزرگ‌تر لازم است.';
+      'ظرفیت حافظه تگ برای نگاشت حافظه اشتراکی PTS50R1 کافی نیست؛ تگ ST25DV16K (۵۱۲ بلوک) یا بزرگ‌تر لازم است.';
 
   @override
   String get idTagModel => 'مدل تگ';

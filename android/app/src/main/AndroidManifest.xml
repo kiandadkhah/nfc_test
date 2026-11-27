@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- NFC: device identification + program transfer (ISO 15693 / NFC Type 5) -->
     <uses-permission android:name="android.permission.NFC" />
+    <!-- Internet: the Location screen renders real OSM map tiles
+         (flutter_map) — without this permission every tile request is
+         blocked and the map stays grey (v4.1.0 field report). -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Location: the real GPS position of the relay feeds the solar
          (Chebyshev) coefficients; the permission is requested at runtime
          from the Location screen. -->
@@ -34,6 +38,23 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- v4.2 — claim the factory NDEF URI of the PTS50 tag
+                 (https://kianex.co/products/pts50r1, NdefContract).
+                 Without this filter Android hands the tag tap to the
+                 browser and the onboarding web page opens behind the
+                 running app (v4.1.0 field report); with it, the tap is
+                 routed to this activity instead — the app stays in the
+                 foreground and no web page is opened. Also gives the
+                 nice onboarding flow: tapping the device tag while the
+                 app is closed launches the app directly. -->
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data
+                    android:scheme="https"
+                    android:host="kianex.co"
+                    android:pathPrefix="/products/pts50" />
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

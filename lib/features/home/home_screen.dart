@@ -1057,7 +1057,9 @@ class _IdentifyOverlayState extends ConsumerState<_IdentifyOverlay> {
             ),
             const SizedBox(height: 14),
             Text(
-              warn ? l.idModelWarnTitle : l.dsFound,
+              warn
+                  ? (!id.modelMatched ? l.idModelWarnTitle : l.idMemoryWarnTitle)
+                  : l.dsFound,
               textAlign: TextAlign.center,
               style: const TextStyle(
                   color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),

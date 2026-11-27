@@ -2678,6 +2678,12 @@ abstract class AppLocalizations {
   /// **'Reading the position failed. Try again in a few moments.'**
   String get gpsTimeout;
 
+  /// No description provided for @mapOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Map tiles need an internet connection — check the phone connectivity.'**
+  String get mapOffline;
+
   /// No description provided for @idModelWarnTitle.
   ///
   /// In en, this message translates to:
@@ -2687,13 +2693,19 @@ abstract class AppLocalizations {
   /// No description provided for @idModelWarnText.
   ///
   /// In en, this message translates to:
-  /// **'The NDEF payload of the tag does not carry the KIANEX identifiers; the tag may not belong to a factory PST50R1 device. The NDEF message is shown below.'**
+  /// **'The NDEF payload of the tag does not carry the KIANEX identifiers; the tag may not belong to a factory PTS50R1 device. The NDEF message is shown below.'**
   String get idModelWarnText;
+
+  /// No description provided for @idMemoryWarnTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Tag read — insufficient memory'**
+  String get idMemoryWarnTitle;
 
   /// No description provided for @idMemoryWarnText.
   ///
   /// In en, this message translates to:
-  /// **'The tag memory is not large enough for the PST50R1 shared-memory layout; an ST25DV16K (512 blocks) or larger Type 5 tag is required.'**
+  /// **'The tag memory is not large enough for the PTS50R1 shared-memory layout; an ST25DV16K (512 blocks) or larger Type 5 tag is required.'**
   String get idMemoryWarnText;
 
   /// No description provided for @idTagModel.

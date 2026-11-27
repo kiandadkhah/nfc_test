@@ -243,7 +243,8 @@ class RealNfcService implements NfcService {
       // The factory NDEF URI identifies the product — the accepted prefix
       // is the KIANEX PTS50 product page (NdefContract). [v4.1: exact URL]
       final modelMatched = NdefContract.uriMatchesProduct(ndefUri);
-      _log.nfc('identify: uri="$ndefUri" expected="${NdefContract.productUrlPrefix}" '
+      _log.nfc('identify: uri="$ndefUri" expected="${NdefContract.productUrl}" '
+          'prefix="${NdefContract.productUrlPrefix}" '
           'model=${info.modelName} '
           'blocks=${link.totalBlocks}/${link.blockSize}B '
           'icRef=0x${link.icRef.toRadixString(16)} '

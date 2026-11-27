@@ -129,9 +129,14 @@ class ProgramsController extends ChangeNotifier {
   /// user sees, the numbering and the device payload stay in sync.
   void _sortDraftEvents() {
     if (_draft == null || _draft!.events.length < 2) return;
+    // Sort a COPY of the list: the cascade evaluates its argument AFTER
+    // clear() runs, so sorting the live list here read the already-emptied
+    // list and silently wiped the whole chain (v4.1.0 field bug — creating
+    // the second event deleted every event).
+    final sorted = sortChain(List<Event>.from(_draft!.events));
     _draft!.events
       ..clear()
-      ..addAll(sortChain(_draft!.events));
+      ..addAll(sorted);
   }
 
   void toggleWeekly(int day) => _toggle(_draft?.assign.weekly, day);
@@ -256,9 +261,12 @@ class ProgramsController extends ChangeNotifier {
         ..clear()
         ..addAll(data.map(Program.fromJson));
       for (final p in _programs) {
+        // Sort a COPY (see _sortDraftEvents) — sorting the live list after
+        // clear() would wipe every persisted event on every app start.
+        final sorted = sortChain(List<Event>.from(p.events));
         p.events
           ..clear()
-          ..addAll(sortChain(p.events));
+          ..addAll(sorted);
       }
       _nextId = _programs.fold<int>(1, (m, p) => p.id >= m ? p.id + 1 : m);
     } catch (_) {

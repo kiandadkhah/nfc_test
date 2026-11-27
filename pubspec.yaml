@@ -1,7 +1,7 @@
 name: kianex_pts50n1_app
 description: KIANEX PTS50N1 companion app — Phase 2 (real ST25DV16KC NFC layer, Material 3, Riverpod, go_router, application logger).
 publish_to: 'none'
-version: 4.1.0+42
+version: 4.2.0+43
 
 environment:
   sdk: '>=3.4.0 <4.0.0'

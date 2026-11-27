@@ -1,4 +1,4 @@
-# KIANEX PTS50N1 — Companion Application (v4.1.0)
+# KIANEX PTS50N1 — Companion Application (v4.2.0)
 
 Flutter companion app for the **KIANEX PTS50N1 / PST50R1** programmable
 single-relay timer. The app plans timer programs, validates the command
@@ -9,7 +9,26 @@ defined in `PST50R1_SourceOfTruth` (SOT v3.1-Final).
 > Android only. iOS was removed from the delivery scope («فقط app برای
 > اندروید ساخته می‌شود»).
 
-## What is new in v4.1.0 (field-report release: permissions, real map,
+## What is new in v4.2.0 (field-report release: real ST25DV addressing,
+NDEF dispatch claim, chain-wipe fix, map connectivity)
+
+Based on the v4.1.0 field test (installed APK + exported log). The tag
+answered correctly in the field — the app asked the wrong questions.
+
+| # | Field report / log evidence | Root cause | Fix in v4.2.0 |
+|---|------------------------------|------------|---------------|
+| 1 | `identify: uri=...pts50r1 … enoughMemory=false modelMatched=true` + «مدل تطبیق نشد / ظرفیت حافظه تگ برای نگاشت کافی نیست» + write aborted `memory_too_small:256x4` | **Wrong addressing model** — the app set the ISO `Protocol_Extension` flag (0x08) for blocks ≥ 256. Per DS10925 Rev 9 the PE flag is «reserved for future use» on ST25DV: the tag rejected every PE-flagged frame with `0x02`/`0x03` (the field log), the open-time self-check then fell back to standard addressing and **clamped the geometry to 256 blocks** → the 433-block layout check failed. Additionally the ST25DV16K/64K standard Get System Info carries **NO memory size** (info flags `0x0B` = DSFID+AFI+IC_REF, Table 158) — the old parser mis-called the correct 13-byte answer «not parseable» | **Real ST command set** (`tag_link.dart`, Table 101): blocks ≥ 256 use the dedicated **extended commands** `0x30` Ext Read Single / `0x31` Ext Write Single / `0x33` Ext Read Multi (2-byte block number LSB first, 16-bit block count in multi) — PE flag is never set. Geometry: standard Get System Info parsed per Table 158 (IC_REF `0x26` ⇒ ST25DV16K/64K family), **Extended Get System Info `0x3B`** (param `0x04`) reads the 16-bit MEM_SIZE (Table 165), and IC_REF profiles (`24h`→128×4, `26h`→512×4) replace the bogus fallback — the production ST25DV16KC now reports 512 × 4 B and `enoughMemory=true` |
+| 2 | When the app is running, Android opens the onboarding web page (`kianex.co/products/pts50r1`) in the background on tag tap | The factory NDEF URI dispatches `ACTION_NDEF_DISCOVERED`; with no claiming app Android hands it to the browser | The activity now **claims the factory URI** in the manifest (`NDEF_DISCOVERED`, `https://kianex.co` + `/products/pts50` prefix): the tap is routed to the app — no browser behind it; when the app is closed, tapping the tag launches the app directly (nice onboarding flow) |
+| 3 | **Bug — creating the second event deleted every event** («ساخت رویداد دوم باعث حذف تمام رویدادها می‌شود») | Cascade self-reference: `_draft!.events..clear()..addAll(sortChain(_draft!.events))` evaluates its argument **after** `clear()`, so the sort read the already-emptied list. Same pattern in `restoreFromLocalJson` wiped every persisted event on every app start | Both spots now sort a **copy** of the list first. Regression tests added (`test/programs_state_test.dart`): two adds keep two events, save keeps the chain, restore keeps every event and re-sorts old chains |
+| 4 | Both map screens (location + picker) stayed grey — no tiles ever loaded | The manifest declared **no `INTERNET` permission** — every OSM tile request was silently blocked by Android | `<uses-permission android:name="android.permission.INTERNET"/>` added; failed tiles now also raise a visible banner «نمایش نقشه به اینترنت نیاز دارد…» via `TileLayer.errorTileCallback` instead of a silent grey page |
+| 5 | The app showed the UID as `AF24ADD7002602E0` while the tag print reads `E0 02 26 00 D7 AD 24 AF` | Android reports the ISO 15693 UID LSB-first | The link reports the **human-readable order** (`uidInHumanOrder`) everywhere — UI and logs match the printed tag |
+| 6 | Identify log `expected="https://kianex.co/products/pts50"` looked like a wrong URL | Prefix logging obscured the exact contract | The identify log now shows the exact product URL **and** the accepted prefix; the result screen shows a **memory-specific** warning title when only the capacity fails (new `idMemoryWarnTitle`), and the texts say PTS50R1 (typo PST50R1 fixed) |
+| 7 | Log lines truncated the raw frames to 10 bytes (`00 0b af 24 …` looked like a truncated system-info answer) | `_hex` capped at 10 bytes | Log hex dumps now show up to 24 bytes; unit tests (`test/system_info_test.dart`) replay the **exact field frames** — the 13-byte `0x0B` answer and the 16-bit MEM_SIZE frame — so a field log can be matched byte-for-byte |
+
+Verification: `flutter analyze` — 0 errors (4 pre-existing infos) ·
+`flutter test` — **67/67 passed** (SDK 3.50.1, the exact CI version).
+
+## What was new in v4.1.0 (field-report release: permissions, real map,
 chain ordering, time UX, NFC protocol fixes)
 
 Based on the v4.0.1 field test (installed APK + exported application log
@@ -68,18 +87,26 @@ pipeline locally with the exact CI Flutter version (3.50.1)**:
   blocks 16..431 (planning area, app-writable) and reads blocks 504..511
   (logger area, MCU-owned). Blocks 0..15 (CC + NDEF) are factory-written
   and never rewritten (R-01).
-* **Addressing**: the SAME ISO command codes serve every tag size —
-  Read Single Block `0x20`, Write Single Block `0x21`, Read Multiple
-  Blocks `0x23`, Get System Info `0x2B`. Tags larger than 256 blocks
-  (ST25DV16K/64K) address blocks with the `Protocol_Extension` flag
-  (bit 3, 0x08) + 2-byte block number; smaller tags use the 1-byte
-  form of the same commands. **Pitfalls verified against the field
-  log**: the codes `0x30/0x31/0x33/0x3B` are NOT an ISO extended
-  command set (`0x2A` is Lock DSFID — never use it as a read), the
-  `Option` flag is rejected by some Type 5 models, and Get System
-  Info answers silently on some phone/tag pairs when PE-flagged — so
-  the link probes block 0 after open and falls back to standard
-  addressing when the tag rejects the extension (`iso15693ErrorText`).
+* **Addressing** (DS10925 Rev 9 — corrected in v4.2): the ST25DV does
+  NOT use the ISO `Protocol_Extension` flag (reserved on ST25DV — the
+  v4.1.0 field log shows every PE-flagged frame rejected with
+  `0x02`/`0x03`). Standard commands reach **only blocks 0..255** of a
+  16K/64K tag; blocks ≥ 256 require the dedicated **extended command
+  family**: Ext Read Single `0x30`, Ext Write Single `0x31`, Ext Read
+  Multi `0x33` (2-byte block number LSB first; multi count is 16 bits),
+  Ext Get System Info `0x3B`. `0x2A` is Lock DSFID — never use it as a
+  read; the Option flag is rejected by some Type 5 models (plain reads
+  and writes everywhere). Tags ≤ 256 blocks use the standard set; the
+  link probes the extended family once at open time and falls back to
+  the standard set + an honest 256-block geometry when a tag rejects it.
+* **Geometry discovery**: the standard Get System Info of a
+  ST25DV16K/64K carries NO memory size (info flags `0x0B` = DSFID +
+  AFI + IC_REF, Table 158) — the size comes from Extended Get System
+  Info `0x3B` (16-bit MEM_SIZE, Table 165: `0x03FF` ⇒ 512 × 4 B) or
+  from the IC_REF profile (Table 166: `24h` ⇒ ST25DV04K 128×4,
+  `26h` ⇒ ST25DV16K/64K ⇒ 512×4 conservative). The factory CC file of
+  the KC series (`E2 40 00 01`) does not encode the size either —
+  deriving it from the CC byte is a trap.
 * **Writes**: plain Write Single Block — NO option flag (the
   write-verify variant is not supported by every Type 5 model and was
   one of the rejected combinations in the field logs); each EEPROM

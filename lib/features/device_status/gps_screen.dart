@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,7 +27,21 @@ class GpsScreen extends ConsumerStatefulWidget {
 
 class _GpsScreenState extends ConsumerState<GpsScreen> {
   bool _fixing = false;
+  bool _tilesFailed = false;
   double? _lastAccuracy;
+
+  /// Set by [TileLayer.errorTileCallback] when a tile request fails —
+  /// normally the missing INTERNET permission (fixed in v4.2) or a
+  /// data connection problem; the UI then explains instead of staying
+  /// silently grey (v4.1.0 field report: «صفحه طوسی رنگ»). Safe to call
+  /// during build: the setState is deferred to a microtask.
+  void _noteTileFailure() {
+    if (_tilesFailed) return;
+    _tilesFailed = true;
+    scheduleMicrotask(() {
+      if (mounted) setState(() {});
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +77,26 @@ class _GpsScreenState extends ConsumerState<GpsScreen> {
                         urlTemplate:
                             'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                         userAgentPackageName: 'ir.kianex.kianex_pts50n1_app',
+                        errorTileCallback: (_, __, ___) => _noteTileFailure(),
                       ),
+                      if (_tilesFailed)
+                        Positioned(
+                          top: 8,
+                          left: 10,
+                          right: 10,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.78),
+                              borderRadius: BorderRadius.circular(99),
+                            ),
+                            child: Text(l.mapOffline,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                    fontSize: 10, color: Color(0xFFFFD7A8))),
+                          ),
+                        ),
                       MarkerLayer(
                         markers: [
                           Marker(
@@ -318,6 +353,15 @@ class MapPickerScreen extends StatefulWidget {
 class _MapPickerScreenState extends State<MapPickerScreen> {
   late LatLng _picked = widget.initial;
   late final MapController _controller = MapController();
+  bool _tilesFailed = false;
+
+  void _noteTileFailure() {
+    if (_tilesFailed) return;
+    _tilesFailed = true;
+    scheduleMicrotask(() {
+      if (mounted) setState(() {});
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -327,32 +371,56 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       body: Column(
         children: [
           Expanded(
-            child: FlutterMap(
-              mapController: _controller,
-              options: MapOptions(
-                initialCenter: widget.initial,
-                initialZoom: 12,
-                onTap: (_, point) => setState(() => _picked = point),
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-                ),
-              ),
+            child: Stack(
               children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'ir.kianex.kianex_pts50n1_app',
-                ),
-                MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: _picked,
-                      width: 46,
-                      height: 46,
-                      child: const Icon(Icons.location_on,
-                          color: AppTheme.orange, size: 42),
+                FlutterMap(
+                  mapController: _controller,
+                  options: MapOptions(
+                    initialCenter: widget.initial,
+                    initialZoom: 12,
+                    onTap: (_, point) => setState(() => _picked = point),
+                    interactionOptions: const InteractionOptions(
+                      flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                    ),
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'ir.kianex.kianex_pts50n1_app',
+                      errorTileCallback: (_, __, ___) => _noteTileFailure(),
+                    ),
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: _picked,
+                          width: 46,
+                          height: 46,
+                          child: const Icon(Icons.location_on,
+                              color: AppTheme.orange, size: 42),
+                        ),
+                      ],
                     ),
                   ],
                 ),
+                if (_tilesFailed)
+                  Positioned(
+                    top: 8,
+                    left: 10,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.78),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                      child: Text(l.mapOffline,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 10, color: Color(0xFFFFD7A8))),
+                    ),
+                  ),
               ],
             ),
           ),

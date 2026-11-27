@@ -1481,15 +1481,22 @@ class AppLocalizationsEn extends AppLocalizations {
       'Reading the position failed. Try again in a few moments.';
 
   @override
+  String get mapOffline =>
+      'Map tiles need an internet connection — check the phone connectivity.';
+
+  @override
   String get idModelWarnTitle => 'Tag read — model not matched';
 
   @override
   String get idModelWarnText =>
-      'The NDEF payload of the tag does not carry the KIANEX identifiers; the tag may not belong to a factory PST50R1 device. The NDEF message is shown below.';
+      'The NDEF payload of the tag does not carry the KIANEX identifiers; the tag may not belong to a factory PTS50R1 device. The NDEF message is shown below.';
+
+  @override
+  String get idMemoryWarnTitle => 'Tag read — insufficient memory';
 
   @override
   String get idMemoryWarnText =>
-      'The tag memory is not large enough for the PST50R1 shared-memory layout; an ST25DV16K (512 blocks) or larger Type 5 tag is required.';
+      'The tag memory is not large enough for the PTS50R1 shared-memory layout; an ST25DV16K (512 blocks) or larger Type 5 tag is required.';
 
   @override
   String get idTagModel => 'Tag model';
