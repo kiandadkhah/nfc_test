@@ -1223,7 +1223,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get needDaysHint =>
-      'Select execution days to enable the “Save program” button.';
+      'Saving without assigned days is not possible — assign the chain execution days in the day-assignment screen.';
 
   @override
   String get phaseRange =>
@@ -1736,10 +1736,30 @@ class AppLocalizationsEn extends AppLocalizations {
       'No enabled program exists to transfer. Enable at least one program (or choose «Settings only»).';
 
   @override
+  String get wpFailNoDays =>
+      'The transfer list contains a weekly/monthly/annual program with no assigned day. Edit the program and assign the execution days of its chain.';
+
+  @override
   String get wpFailModel =>
       'The tag link is not the whitelisted PTS50R1 product URL, or the recognized model is not supported. The transfer only runs on an original PTS50R1 tag.';
 
   @override
   String get wpFailUid =>
       'The tag UID does not carry the ST25DV16KC signature — the transfer was stopped.';
+
+  @override
+  String noDaysWeekly(String name) {
+    return 'The weekly program “$name” cannot be saved without assigned days. An event chain is meaningless in the weekly cycle without a weekday — pick at least one day of the week (Saturday to Friday) in the day-assignment screen.';
+  }
+
+  @override
+  String noDaysMonthly(String name) {
+    return 'The monthly program “$name” cannot be saved without assigned days. An event chain is meaningless in the monthly cycle without a month day — pick at least one day of the month (1 to 31) in the day-assignment screen.';
+  }
+
+  @override
+  String noDaysAnnual(String name) {
+    return 'The annual program “$name” cannot be saved without assigned dates. An event chain is meaningless in the annual cycle without a date — pick at least one day of the year (1 to 366) in the day-assignment screen.';
+  }
+
 }

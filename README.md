@@ -1,4 +1,4 @@
-# KIANEX PTS50N1 — Companion Application (v4.3.0)
+# KIANEX PTS50N1 — Companion Application (v4.4.0)
 
 Flutter companion app for the **KIANEX PTS50N1 / PST50R1** programmable
 single-relay timer. The app plans timer programs, validates the command
@@ -8,6 +8,27 @@ defined in `PST50R1_SourceOfTruth` (SOT v3.1-Final).
 
 > Android only. iOS was removed from the delivery scope («فقط app برای
 > اندروید ساخته می‌شود»).
+
+## What is new in v4.4.0 (field-report release: the programs really reach
+the tag, ST25DV power register, day-assignment rule)
+
+Based on the v4.3.0 field test (APK from Actions + exported log + the
+independent memory analysis `pst50r1-analysis-…json`). The decisive
+v4.3.0 evidence: step 4 wrote ONLY blocks 416..429 (the 14-block
+settings-only payload, all zeros) and APP_CRC32 came out `0x0993D8D7` —
+the CRC of an all-zero planning area — so the cycle tables, event pool
+and timer pool were never part of the transfer at all.
+
+| # | Field report | Root cause | Fix in v4.4.0 |
+|---|--------------|------------|---------------|
+| 1 | «اپ همچنان ناتوان از انتقال برنامه بر روی حافظه تگ است، تمام مقدار حافظه تگ صفر است» (v4.3.0 log: three complete transfers, each writing only blocks 416..429 with zero payloads) | `_buildPlan` diverted EVERY `skipClock=true` run to the settings-only branch — and the relay was unpowered in the whole session, so the user always continued with «ادامه ارسال بدون همگام‌سازی ساعت», which sets `skipClock=true`. Result: cycle tables (blocks 16..107), monthly/weekly/daily tables, event pool (119..373) and timer pool (375..399) were NEVER written. The v4.3 sentinel skipped exactly this path (`&& !skipClock`) | The program mode now builds the **FULL planning image (blocks 16..431) in every case** (`memory_map.dart` + `sot_protocol.dart`). `skipClock` only decides the SET blocks: powered → new clock written; unpowered-continue → the tag's current clock/calendar bytes (blocks 428/429) are **read from the tag and preserved byte-exactly**. The step-7 all-zero sentinel now guards both paths (regression test: «skipClock continue writes the FULL program image») |
+| 2 | Chebyshev coefficient blocks also reached the tag as zeros | The old Q14 encoding multiplied MINUTES by 16384 — the mean sunrise value (c0 ≈ 363 min) needs 24 bits and cannot fit the 16-bit storage of map_bit_2.csv; truncation produced garbage/zeros | New scale — **fraction-of-day Q14** (`chebyshev.dart`): stored = round(minutes / 1440 × 16384) as a signed 16-bit word; the firmware reconstructs minutes = stored × 1440 / 16384 (LSB ≈ 5.3 s). Every coefficient now fits comfortably (max ≈ 12 500 of ±32 767). [OI — the scale interpretation must be confirmed with the firmware engineer; changing it touches only `fitChebyshevQ14`] |
+| 3 | «برای بررسی تغذیه تگ باید از رجیسترهای st25dv16kc استفاده کنی — یک ثبات در ای‌سی وضعیت تغذیه را اعلام می کند» | The power decision used the logger heuristic (run=0 / logCrc=0) — an indirect «has the MCU ever run» guess, not the live supply state | The protocol reads the **EH_CTRL_Dyn dynamic register** through the ST25DV custom command **«Read Dynamic Register» (B2h, addressed mode, IC mfg code 02h)**: bit FIELD_ON (sanity — the RF field carrying the read must be on), bit **VCC_ON = the tag VCC pin is powered → the relay is alive**. Candidate addresses 0001h (ST25DV-I2C) and 0002h (KC generation layout) are probed and validated via FIELD_ON; when the register is unavailable the logger heuristic stays as the documented fallback. Every raw register value is logged (`step2: power register EH_CTRL_Dyn@0x1=0x…`) |
+| 4 | «در چرخه ها هفتگی، ماهانه و سالانه کاربر می تواند بدون اختصاص روز برنامه را ثبت کند. زنجیره رویداد بدون اختصاص روز بی معناست» | The `needsDays` check summed ALL THREE day lists — a stale list of another cycle (cycle switching never cleared them) satisfied the rule, and the payload builder reads only the program's OWN cycle list, so the saved program wrote orphan events no day slot ever pointed at | **Per-cycle day rule (P-06)** (`validators.dart: programNeedsDays`): weekly needs ≥ 1 weekday, monthly ≥ 1 month-day, annual ≥ 1 year-day. Enforced three times: editor popup with «متوجه شدم», `saveDraft` hard guard, and the transfer guard (`program_without_days` failure with its own wording). `setDraftCycle` now clears the stale day lists of the other cycles |
+| 5 | ENDA clarification: «ناحیه ها در سند حقیقت ناحیه فرضی است و ربطی به ناحیه بندی حافظه با ریجیستر ENDA ندارد؛ ENDA1/ENDA2/ENDA3 = 0x3F» | — | Documented behaviour: the app treats the truth-document areas purely as LOGICAL block ranges and never touches the hardware sectioning — no ENDA access, no area-boundary writes; the read/write range logic (chunk splitting on area boundaries) already tolerates any factory ENDA configuration |
+
+Verification pipeline unchanged: `flutter gen-l10n` → `flutter analyze` →
+`flutter test` → `flutter build apk --release`.
 
 ## What is new in v4.3.0 (field-report release: exclusive NFC, write
 verification, Iranian map, exact-link identification, program rules)

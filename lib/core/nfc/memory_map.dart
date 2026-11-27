@@ -219,6 +219,15 @@ class WritePlan {
 
 /// Builds the full-program payload (blocks 16..431) from the enabled programs.
 /// Only enabled programs are encoded — disabled programs are never sent.
+///
+/// v4.4 — [writeClock] = false (the unpowered-continue path) keeps the SET
+/// blocks 428/429 out of the clock update: when [preservedSetBytes] carries
+/// the 8 bytes currently stored on the tag they are written back unchanged,
+/// otherwise the SET blocks stay zero. The program areas (cycle tables,
+/// event pool, timer pool, coefficients) are ALWAYS part of the payload —
+/// the v4.3.0 field bug (skipClock silently downgraded the transfer to the
+/// 14-block settings-only plan, leaving every program value at zero) is
+/// closed by construction.
 WritePlan buildProgramWritePlan({
   required List<Program> enabledPrograms,
   required DateTime deviceTime,
@@ -226,6 +235,8 @@ WritePlan buildProgramWritePlan({
   required List<int> sunriseQ14,
   required List<int> sunsetQ14,
   required int newProgramCounter,
+  bool writeClock = true,
+  List<int>? preservedSetBytes,
 }) {
   final img = PlanningImage();
   var eventNo = 0;
@@ -274,8 +285,14 @@ WritePlan buildProgramWritePlan({
   }
 
   img.setSolarCoefficients(sunriseQ14: sunriseQ14, sunsetQ14: sunsetQ14);
-  img.setClock(deviceTime,
-      jalaliYear2: jalali.year2, jalaliMonth: jalali.month, jalaliDay: jalali.day);
+  if (preservedSetBytes != null && preservedSetBytes.length == 8) {
+    // Keep the device clock/calendar exactly as it currently is on the tag.
+    img.setBlock(SotMemoryMap.blockSet, preservedSetBytes.sublist(0, 4));
+    img.setBlock(SotMemoryMap.blockSetDate, preservedSetBytes.sublist(4, 8));
+  } else if (writeClock) {
+    img.setClock(deviceTime,
+        jalaliYear2: jalali.year2, jalaliMonth: jalali.month, jalaliDay: jalali.day);
+  }
   img.setPlanningRegister(ProcessCodes.programStart, newProgramCounter);
   img.setAppCrc32(img.appCrc32);
 

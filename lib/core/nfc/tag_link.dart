@@ -54,7 +54,46 @@ abstract class TagLink {
   Future<Uint8List> readBlock(int block);
   Future<List<Uint8List>> readBlockRange(int first, int last);
   Future<void> writeBlock(int block, Uint8List b0to3);
+
+  /// v4.4 — reads one ST25DV dynamic register over the RF custom command
+  /// «Read Dynamic Register» (B2h). Returns null when the tag does not
+  /// answer the custom command (unsupported model / busy RF condition) —
+  /// the caller then falls back to the logger heuristic.
+  Future<int?> readDynamicRegister(int address);
+
+  /// v4.4 — reads the EH_CTRL_Dyn power-supply status (VCC_ON / FIELD_ON /
+  /// EH_ON / EH_EN). The base implementation reports «unavailable»; the
+  /// ISO 15693 link implements the real register probe and the fake
+  /// test link serves its seeded register map.
+  Future<TagPowerStatus?> readPowerStatus() async => null;
+
   Future<void> close();
+}
+
+/// v4.4 — power-supply status decoded from the ST25DV dynamic register
+/// EH_CTRL_Dyn (system config address 0001h on ST25DV-I2C; the KC
+/// generation may place it at 0002h — both are probed). The register
+/// carries the LIVE hardware status bits the field report asked for
+/// («یک ثبات در ای‌سی وضعیت تغذیه را اعلام می کند»):
+///   b0 EH_EN     — energy harvesting enable (RW)
+///   b1 EH_ON     — EH output currently active (RO)
+///   b2 FIELD_ON  — an RF field is present right now (RO)
+///   b3 VCC_ON    — the tag VCC pin is powered = the relay is alive (RO)
+class TagPowerStatus {
+  const TagPowerStatus(this.registerAddress, this.raw);
+
+  final int registerAddress;
+  final int raw;
+
+  bool get ehEn => raw & 0x01 != 0;
+  bool get ehOn => raw & 0x02 != 0;
+  bool get fieldOn => raw & 0x04 != 0;
+  bool get vccOn => raw & 0x08 != 0;
+
+  @override
+  String toString() =>
+      'EH_CTRL_Dyn@0x${registerAddress.toRadixString(16)}=0x${raw.toRadixString(16).padLeft(2, '0')}'
+      ' (EH_EN=${ehEn ? 1 : 0} EH_ON=${ehOn ? 1 : 0} FIELD_ON=${fieldOn ? 1 : 0} VCC_ON=${vccOn ? 1 : 0})';
 }
 
 class TagLinkException implements Exception {
@@ -658,6 +697,78 @@ class Iso15693TagLink implements TagLink {
     });
   }
 
+  // ------------------------------------------------------------------
+  // v4.4 — ST25DV dynamic registers (power-supply status)
+  // ------------------------------------------------------------------
+
+  /// Request flags for the ST25DV custom commands: high data rate +
+  /// ADDRESSED (bit 5 = 0x20) — the custom command family (B1h..BFh) is
+  /// only served in addressed or selected mode, never unaddressed.
+  static const int _customCommandFlags = _flagDataRateHigh | 0x20;
+
+  /// IC manufacturing code of STMicroelectronics in ISO 15693 — the first
+  /// byte after the request flags in every ST25DV custom command frame.
+  static const int _stIcMfgCode = 0x02;
+
+  /// «Read Dynamic Register» custom command code (DS10925 Table 101,
+  /// ST25DV-I2C custom commands).
+  static const int _cmdReadDynamicRegister = 0xB2;
+
+  /// Candidate addresses of EH_CTRL_Dyn. ST25DV-I2C (DS13943): 0001h.
+  /// KC generation: GPO1_CTRL_Dyn 0000h, GPO2_CTRL_Dyn 0001h, ACT_CTRL_Dyn
+  /// 0002h — the probe validates each candidate through the FIELD_ON bit
+  /// (an RF field IS present while this command runs) so the layout
+  /// difference is detected on the real chip, not assumed.
+  static const List<int> _ehCtrlDynCandidates = [0x01, 0x02];
+
+  @override
+  Future<int?> readDynamicRegister(int address) async {
+    final uidBytes = <int>[
+      for (var i = 0; i + 1 < _rawUidHex.length; i += 2)
+        int.tryParse(_rawUidHex.substring(i, i + 2), radix: 16) ?? 0,
+    ];
+    final frame = [
+      _customCommandFlags,
+      _stIcMfgCode,
+      _cmdReadDynamicRegister,
+      address & 0xFF,
+      ...uidBytes,
+    ];
+    try {
+      final body = await _respBody(frame, 'reg[${address.toRadixString(16)}]');
+      if (body.length < 2) {
+        _event('reg[${address.toRadixString(16)}]: short register response');
+        return null;
+      }
+      return body[1];
+    } on TagLinkException catch (e) {
+      // Command not implemented by this tag / busy RF — reported, not
+      // raised: the caller decides the fallback.
+      _event('reg[${address.toRadixString(16)}] read failed: ${e.message} '
+          'code=${e.errorCode == null ? '-' : '0x${e.errorCode!.toRadixString(16)}'}');
+      return null;
+    }
+  }
+
+  /// Reads the EH_CTRL_Dyn power-supply status. Returns null when neither
+  /// candidate address yields a register whose FIELD_ON bit is set (which
+  /// is mandatory — the RF field carrying this very command is on).
+  @override
+  Future<TagPowerStatus?> readPowerStatus() async {
+    for (final address in _ehCtrlDynCandidates) {
+      final raw = await readDynamicRegister(address);
+      if (raw == null) continue;
+      final status = TagPowerStatus(address, raw);
+      if (status.fieldOn) {
+        _event('power register found: $status');
+        return status;
+      }
+      _event('power register probe @$address rejected (FIELD_ON=0) — trying next');
+    }
+    _event('power register: EH_CTRL_Dyn not found — fallback required');
+    return null;
+  }
+
   /// One retry after a short pause — covers the RF/I²C arbitration windows
   /// described in SOT §4.1 (tag busy while the MCU owns the I²C bus).
   /// Command-level rejections (0x01/0x02/0x03) are NOT retried — the frame
@@ -747,6 +858,30 @@ class FakeTagLink implements TagLink {
   Future<void> writeBlock(int block, Uint8List b0to3) async {
     seedBlock(block, b0to3);
     _writes += 1;
+  }
+
+  /// Dynamic-register image for the tests — address → value. When an
+  /// address is seeded the fake answers the custom command like the real
+  /// ST25DV16KC; when the map is empty the register read fails and the
+  /// protocol falls back to the logger heuristic (same as hardware
+  /// without EH_CTRL_Dyn support).
+  final Map<int, int> dynamicRegisters = {};
+
+  @override
+  Future<int?> readDynamicRegister(int address) async => dynamicRegisters[address];
+
+  @override
+  Future<TagPowerStatus?> readPowerStatus() async {
+    // Same probe semantics as the real link: the candidate register must
+    // carry FIELD_ON (an RF field is present during the read) to be
+    // accepted as EH_CTRL_Dyn.
+    for (final address in const [0x01, 0x02]) {
+      final raw = dynamicRegisters[address];
+      if (raw == null) continue;
+      final status = TagPowerStatus(address, raw);
+      if (status.fieldOn) return status;
+    }
+    return null;
   }
 
   @override

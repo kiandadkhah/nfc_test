@@ -589,6 +589,21 @@ bool programRulesBlock(
     programRuleViolations(programs, draft: draft, draftEditIndex: draftEditIndex)
         .any((v) => v.blocking);
 
+/// v4.4 — the day-assignment rule (user report: «زنجیره رویداد بدون
+/// اختصاص روز در چرخه‌ها هفتگی، ماهانه و سالانه بی‌معناست»). A non-daily
+/// program is only meaningful when THE OWN cycle's day list carries at
+/// least one day. The check is strictly per-cycle: stale day lists of the
+/// OTHER cycles (left over from a cycle switch) must not let a day-less
+/// program pass — the old combined sum check had exactly that hole, and
+/// the payload builder reads only the program's own cycle list, so such a
+/// program would write orphan events no day slot ever points at.
+bool programNeedsDays(Program p) => switch (p.cycle) {
+      CycleType.daily => false,
+      CycleType.weekly => p.assign.weekly.isEmpty,
+      CycleType.monthly => p.assign.monthly.isEmpty,
+      CycleType.annual => p.assign.annualDays.isEmpty,
+    };
+
 Set<int> _daysOf(Program p) => switch (p.cycle) {
       CycleType.daily => const {0},
       CycleType.weekly => p.assign.weekly.toSet(),

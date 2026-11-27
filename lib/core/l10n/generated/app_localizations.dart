@@ -2279,7 +2279,7 @@ abstract class AppLocalizations {
   /// No description provided for @needDaysHint.
   ///
   /// In en, this message translates to:
-  /// **'Select execution days to enable the “Save program” button.'**
+  /// **'Saving without assigned days is not possible — assign the chain execution days in the day-assignment screen.'**
   String get needDaysHint;
 
   /// No description provided for @phaseRange.
@@ -3093,6 +3093,9 @@ abstract class AppLocalizations {
   /// **'No enabled program exists to transfer. Enable at least one program (or choose «Settings only»).'**
   String get wpFailNoPrograms;
 
+  String get wpFailNoDays;
+
+
   /// No description provided for @wpFailModel.
   ///
   /// In en, this message translates to:
@@ -3104,6 +3107,25 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The tag UID does not carry the ST25DV16KC signature — the transfer was stopped.'**
   String get wpFailUid;
+
+  /// No description provided for @noDaysWeekly.
+  ///
+  /// In en, this message translates to:
+  /// **'The weekly program “{name}” cannot be saved without assigned days. An event chain is meaningless in the weekly cycle without a weekday — pick at least one day of the week (Saturday to Friday) in the day-assignment screen.'**
+  String noDaysWeekly(String name);
+
+  /// No description provided for @noDaysMonthly.
+  ///
+  /// In en, this message translates to:
+  /// **'The monthly program “{name}” cannot be saved without assigned days. An event chain is meaningless in the monthly cycle without a month day — pick at least one day of the month (1 to 31) in the day-assignment screen.'**
+  String noDaysMonthly(String name);
+
+  /// No description provided for @noDaysAnnual.
+  ///
+  /// In en, this message translates to:
+  /// **'The annual program “{name}” cannot be saved without assigned dates. An event chain is meaningless in the annual cycle without a date — pick at least one day of the year (1 to 366) in the day-assignment screen.'**
+  String noDaysAnnual(String name);
+
 }
 
 class _AppLocalizationsDelegate

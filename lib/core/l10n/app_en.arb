@@ -647,7 +647,7 @@
   "asRemovedOne": "The day was removed from the selection list",
   "asRequired": "Required",
   "needDays": "Assign the execution days of the chain before saving the program.",
-  "needDaysHint": "Select execution days to enable the “Save program” button.",
+  "needDaysHint": "Saving without assigned days is not possible — assign the chain execution days in the day-assignment screen.",
   "phaseRange": "Allowed range: 5 to 720 minutes — adjusted in 5-minute steps.",
   "countActiveFmt": "{n} active · {m} disabled",
   "@countActiveFmt": {
@@ -1088,6 +1088,31 @@
   },
   "wpFailPayload": "Writing the programs to the tag memory failed verification: the blocks were read back and a mismatch remained. Keep the phone steady on the device and try again; the log holds the failing block number.",
   "wpFailNoPrograms": "No enabled program exists to transfer. Enable at least one program (or choose «Settings only»).",
+  "wpFailNoDays": "The transfer list contains a weekly/monthly/annual program with no assigned day. Edit the program and assign the execution days of its chain.",
   "wpFailModel": "The tag link is not the whitelisted PTS50R1 product URL, or the recognized model is not supported. The transfer only runs on an original PTS50R1 tag.",
-  "wpFailUid": "The tag UID does not carry the ST25DV16KC signature — the transfer was stopped."
+  "wpFailUid": "The tag UID does not carry the ST25DV16KC signature — the transfer was stopped.",
+  "noDaysWeekly": "The weekly program “{name}” cannot be saved without assigned days. An event chain is meaningless in the weekly cycle without a weekday — pick at least one day of the week (Saturday to Friday) in the day-assignment screen.",
+  "@noDaysWeekly": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "noDaysMonthly": "The monthly program “{name}” cannot be saved without assigned days. An event chain is meaningless in the monthly cycle without a month day — pick at least one day of the month (1 to 31) in the day-assignment screen.",
+  "@noDaysMonthly": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "noDaysAnnual": "The annual program “{name}” cannot be saved without assigned dates. An event chain is meaningless in the annual cycle without a date — pick at least one day of the year (1 to 366) in the day-assignment screen.",
+  "@noDaysAnnual": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
 }

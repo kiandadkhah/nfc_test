@@ -259,6 +259,195 @@ void main() {
       expect(last, isNotNull);
       expect(last!.powerOff, isTrue);
     });
+
+    test('v4.4 — EH_CTRL_Dyn VCC_ON=0 halts even with a healthy logger', () async {
+      // The power-supply status comes from the ST25DV16KC register, not
+      // from the logger heuristic: a healthy-looking logger (run=3, valid
+      // LOG_CRC32) must NOT override a live VCC_ON=0 report.
+      final link = FakeTagLink();
+      seedOnboarding(link);
+      seedPoweredLogger(link);
+      link.dynamicRegisters[0x01] = 0x04; // FIELD_ON=1, VCC_ON=0
+      final engine = SotProtocol(link);
+      WriteProgress? last;
+      final result = await engine.run(
+        SotWriteRequest(
+          mode: WriteMode.programAndSettings,
+          enabledPrograms: [
+            Program(
+              id: 1,
+              name: 'p',
+              cycle: CycleType.daily,
+              events: [_fixed(6, 30)],
+              assign: Assignment(),
+            ),
+          ],
+          deviceTime: DateTime(2025, 11, 25, 9, 0),
+          latitude: 35.6892,
+          longitude: 51.3890,
+          utcOffsetHours: 3.5,
+        ),
+        fromStep: 1,
+        onProgress: (p) => last = p,
+      );
+      expect(result, isNull);
+      expect(last!.powerOff, isTrue);
+    });
+
+    test('v4.4 — EH_CTRL_Dyn VCC_ON=1 lets a blank-logger relay proceed', () async {
+      final link = FakeTagLink();
+      seedOnboarding(link);
+      for (var b = 504; b <= 511; b++) {
+        link.seedBlock(b, [0xFF, 0xFF, 0xFF, 0xFF]);
+      }
+      link.dynamicRegisters[0x01] = 0x0C; // FIELD_ON=1, VCC_ON=1
+      final engine = SotProtocol(link);
+      final result = await engine.run(
+        SotWriteRequest(
+          mode: WriteMode.programAndSettings,
+          enabledPrograms: [
+            Program(
+              id: 1,
+              name: 'p',
+              cycle: CycleType.daily,
+              events: [_fixed(6, 30), _fixed(7, 0, cmd: RelayCommand.off)],
+              assign: Assignment(),
+            ),
+          ],
+          deviceTime: DateTime(2025, 11, 25, 9, 0),
+          latitude: 35.6892,
+          longitude: 51.3890,
+          utcOffsetHours: 3.5,
+        ),
+        fromStep: 1,
+        onProgress: (_) {},
+      );
+      expect(result, isNotNull); // no power-off halt
+      await link.close();
+    });
+
+    test('v4.4 — skipClock continue writes the FULL program image', () async {
+      // THE v4.3.0 field bug regression: on the unpowered-continue path
+      // the plan was silently downgraded to the 14-block settings-only
+      // payload — every program value stayed zero on the real tag
+      // (APP_CRC32 = 0x0993D8D7). The full image must be written in this
+      // path too, with the SET bytes preserved from the tag.
+      final link = FakeTagLink();
+      seedOnboarding(link);
+      for (var b = 504; b <= 511; b++) {
+        link.seedBlock(b, [0xFF, 0xFF, 0xFF, 0xFF]);
+      }
+      link.dynamicRegisters[0x01] = 0x04; // FIELD_ON=1, VCC_ON=0
+      // A live device clock the continue path must preserve.
+      link.seedBlock(428, [12, 34, 21, 0]); // sec/min/hour/week
+      link.seedBlock(429, [4, 9, 4, 0]); // day/month/year2/RES
+
+      final programs = [
+        Program(
+          id: 1,
+          name: 'p',
+          cycle: CycleType.daily,
+          events: [_fixed(6, 30), _fixed(7, 0, cmd: RelayCommand.off)],
+          assign: Assignment(),
+        ),
+        Program(
+          id: 2,
+          name: 'w',
+          cycle: CycleType.weekly,
+          events: [_fixed(12, 0, cmd: RelayCommand.on)],
+          assign: Assignment(weekly: [0]), // Saturday
+        ),
+      ];
+      final engine = SotProtocol(link);
+      final halted = await engine.run(
+        SotWriteRequest(
+          mode: WriteMode.programAndSettings,
+          enabledPrograms: programs,
+          deviceTime: DateTime(2025, 11, 25, 9, 0),
+          latitude: 35.6892,
+          longitude: 51.3890,
+          utcOffsetHours: 3.5,
+        ),
+        fromStep: 1,
+        onProgress: (_) {},
+      );
+      expect(halted, isNull); // power-off halt at step 2
+
+      final result = await engine.run(
+        SotWriteRequest(
+          mode: WriteMode.programAndSettings,
+          enabledPrograms: programs,
+          deviceTime: DateTime(2025, 11, 25, 9, 0),
+          latitude: 35.6892,
+          longitude: 51.3890,
+          utcOffsetHours: 3.5,
+        ),
+        fromStep: 2,
+        skipClock: true,
+        onProgress: (_) {},
+      );
+      expect(result, isNotNull);
+
+      // Daily chain: head = event 1, written to block 118.
+      final daily = await link.readBlock(118);
+      expect(daily[0], 1);
+      // Event 1 lands in block 119 with a REAL time (390 min = 06:30).
+      final ev = await link.readBlock(119);
+      expect(ev[0], 390 & 0xFF);
+      expect(ev[1] & 0x07, 390 >> 8);
+      // Weekly Saturday slot points at the weekly program's chain.
+      final weekly = await link.readBlock(116);
+      expect(weekly[0], 3); // head of the second program (2 events + 1)
+      // Chebyshev coefficients are non-zero (16-bit-safe scale).
+      final coef = await link.readBlock(416);
+      expect(coef[0] | coef[1] << 8, isNot(0));
+      // The SET bytes were preserved from the tag, not overwritten with
+      // the phone clock (skipClock).
+      final setBlock = await link.readBlock(428);
+      expect(setBlock[0], 12);
+      expect(setBlock[1], 34);
+      // The stored APP_CRC32 is NOT the all-zero payload sentinel.
+      final crcBlock = await link.readBlock(431);
+      final storedCrc = crcBlock[0] |
+          (crcBlock[1] << 8) |
+          (crcBlock[2] << 16) |
+          (crcBlock[3] << 24);
+      expect(storedCrc, isNot(0x0993D8D7));
+      await link.close();
+    });
+
+    test('v4.4 — a day-less weekly program is refused at transfer time', () async {
+      final link = FakeTagLink();
+      seedOnboarding(link);
+      seedPoweredLogger(link);
+      link.dynamicRegisters[0x01] = 0x0C; // powered
+      final engine = SotProtocol(link);
+      await expectLater(
+        engine.run(
+          SotWriteRequest(
+            mode: WriteMode.programAndSettings,
+            enabledPrograms: [
+              Program(
+                id: 1,
+                name: 'w',
+                cycle: CycleType.weekly,
+                events: [_fixed(6, 30)],
+                assign: Assignment(), // NO days assigned
+              ),
+            ],
+            deviceTime: DateTime(2025, 11, 25, 9, 0),
+            latitude: 35.6892,
+            longitude: 51.3890,
+            utcOffsetHours: 3.5,
+          ),
+          fromStep: 1,
+          onProgress: (_) {},
+        ),
+        throwsA(isA<TagLinkException>()
+            .having((e) => e.message, 'message', contains('program_without_days'))),
+      );
+      await link.close();
+    });
   });
 
   group('Chebyshev / solar', () {
@@ -270,6 +459,19 @@ void main() {
       for (final day in [1, 30, 90, 180, 270, 366]) {
         final approx = evaluateChebyshevQ14(coeffs, dayToChebyshevX(day));
         expect((approx - table[day - 1]).abs(), lessThan(2.0));
+      }
+    });
+
+    test('v4.4 — Q14 coefficients fit the 16-bit signed container', () {
+      // The fraction-of-day scale must keep EVERY coefficient inside the
+      // signed 16-bit word — the plain minutes-Q14 overflowed (c0 ≈ 363
+      // min × 16384 = 5.9 M) and produced garbage/zeros on the real tag.
+      for (final base in [330, 720, 1100]) {
+        final table = List<int>.generate(
+            366, (i) => (base + 90 * math.cos(math.pi * i / 365)).round());
+        for (final c in fitChebyshevQ14FromTable(table)) {
+          expect(c, inInclusiveRange(-32768, 32767));
+        }
       }
     });
 

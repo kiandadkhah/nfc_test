@@ -37,8 +37,25 @@ List<double> chebyshevNodes() {
 
 double _t(int k, double x) => math.cos(k * math.acos(x));
 
+/// v4.4 coefficient scale — FRACTION-OF-DAY in Q14.
+///
+/// The device stores each coefficient in 16 bits (map_bit_2.csv:
+/// Chebyshev_Coefficient_XX_L/H). A plain Q14 of MINUTES cannot fit: the
+/// mean sunrise/sunset value (c0 ≈ 360…1100 min) would need up to 24 bits
+/// (363 min × 16384 = 5.9 M) and the truncation to 16 bits produced
+/// garbage/zeros on the real tag (v4.2.0/v4.3.0 field analysis). With the
+/// fraction-of-day scale every coefficient fits comfortably in a SIGNED
+/// 16-bit word (largest term ≈ 12 500 of ±32 767) and the reconstruction
+/// is exact: minutes = stored × 1440 / 16384 (LSB ≈ 5.3 s).
+/// [OI — the scale interpretation must be confirmed with the firmware
+/// engineer; changing it only touches this file.]
+const int dayMinutes = 1440;
+
 /// Fits [f] evaluated at the 12 Chebyshev nodes and returns the Q14
-/// coefficients c0..c11 such that f(x) ≈ Σ c_k·T_k(x) for all x ∈ [−1, 1].
+/// coefficients c0..c11 such that
+///   f(x) ≈ Σ (c_k / 16384) × 1440 × T_k(x)   [f in minutes of day]
+/// for all x ∈ [−1, 1]. Stored values are SIGNED 16-bit Q14 of the
+/// minutes/1440 fraction.
 List<int> fitChebyshevQ14(double Function(double x) f) {
   final nodes = chebyshevNodes();
   final values = nodes.map(f).toList();
@@ -51,14 +68,16 @@ List<int> fitChebyshevQ14(double Function(double x) f) {
     final c = (2.0 / chebyshevOrder) * sum;
     coeffs[k] = k == 0 ? c / 2.0 : c;
   }
-  return coeffs.map((c) => (c * q14One).round()).toList();
+  return coeffs
+      .map((c) => (c / dayMinutes * q14One).round().toSigned(16))
+      .toList();
 }
 
-/// Evaluates the stored Q14 coefficients (minutes of day).
+/// Evaluates the stored Q14 coefficients into minutes of day.
 double evaluateChebyshevQ14(List<int> coeffsQ14, double x) {
   var sum = 0.0;
   for (var k = 0; k < coeffsQ14.length && k < chebyshevOrder; k++) {
-    sum += (coeffsQ14[k] / q14One) * _t(k, x);
+    sum += (coeffsQ14[k] / q14One) * dayMinutes * _t(k, x);
   }
   return sum;
 }

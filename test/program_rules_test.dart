@@ -212,4 +212,46 @@ void main() {
       expect(crc32Stm32(List<int>.filled(1656, 0)), 0x0993D8D7);
     });
   });
+
+  group('v4.4 day-assignment rule (P-06)', () {
+    test('a non-daily program without its OWN cycle days is invalid', () {
+      expect(programNeedsDays(_p(1, 'w', CycleType.weekly)), isTrue);
+      expect(programNeedsDays(_p(2, 'm', CycleType.monthly)), isTrue);
+      expect(programNeedsDays(_p(3, 'a', CycleType.annual)), isTrue);
+      expect(programNeedsDays(_p(4, 'd', CycleType.daily)), isFalse);
+    });
+
+    test('a program with days of its own cycle is valid', () {
+      expect(
+          programNeedsDays(_p(1, 'w', CycleType.weekly, weekly: [0])), isFalse);
+      expect(
+          programNeedsDays(
+              _p(2, 'm', CycleType.monthly, monthly: [1, 31])),
+          isFalse);
+      expect(
+          programNeedsDays(
+              _p(3, 'a', CycleType.annual, annualDays: [1, 366])),
+          isFalse);
+    });
+
+    test('stale day lists of OTHER cycles do not satisfy the rule', () {
+      // v4.3.0 field bug: the combined sum over all three lists let a
+      // day-less weekly program pass when an annual list was populated.
+      final stale = Program(
+        id: 5,
+        name: 'w',
+        cycle: CycleType.weekly,
+        events: _p(5, 'w', CycleType.weekly).events,
+        assign: Assignment(annualDays: [10]), // stale annual days
+      );
+      expect(programNeedsDays(stale), isTrue);
+    });
+
+    test('the save path refuses a day-less program', () {
+      // saveDraft hard-guards through programNeedsDays — the pure check
+      // is covered here; the editor popup uses the same function.
+      final list = [_p(1, 'w', CycleType.weekly)];
+      expect(list.any(programNeedsDays), isTrue);
+    });
+  });
 }

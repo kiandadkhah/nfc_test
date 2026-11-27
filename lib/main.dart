@@ -18,7 +18,7 @@ Future<void> main() async {
   // report references this log).
   final logger = AppLogger.instance;
   await logger.initFile();
-  logger.sessionStart(appVersion: '4.3.0', locale: settings.locale.languageCode);
+  logger.sessionStart(appVersion: '4.4.0', locale: settings.locale.languageCode);
 
   final programs = ProgramsController(prefs)
     ..restoreFromLocalJson(prefs.getString('programs.data'));

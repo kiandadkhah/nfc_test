@@ -265,12 +265,13 @@ class ChainScreen extends ConsumerWidget {
         programViolations.where((v) => v.blocking).toList();
     final advisoryProgramViolations =
         programViolations.where((v) => !v.blocking).toList();
-    // Date rule: non-daily cycles must have at least one assigned day,
-    // otherwise saving stays disabled. [Q-10]
-    final assignCount = draft.assign.weekly.length +
-        draft.assign.monthly.length +
-        draft.assign.annualDays.length;
-    final needsDays = draft.cycle != CycleType.daily && assignCount == 0;
+    // v4.4 day rule — strictly per-cycle: a non-daily program needs at
+    // least one day in ITS OWN cycle list. The former combined sum over
+    // all three lists let a day-less weekly/monthly/annual program pass
+    // whenever a stale list of another cycle was non-empty (v4.3.0 field
+    // bug). The save flow pops the rule dialog; this flag only drives the
+    // inline hint under the save button.
+    final needsDays = programNeedsDays(draft);
 
     return Scaffold(
       appBar: AppBar(
@@ -479,6 +480,22 @@ class ChainScreen extends ConsumerWidget {
     final draft = programs.draft;
     if (draft == null || draft.events.isEmpty) {
       showAppMessage(context, l.capacityBlock, isError: true);
+      return;
+    }
+    // v4.4 day rule — P-06: a non-daily program without at least one day
+    // in its OWN cycle list is meaningless (the device day tables would
+    // hold no pointer to its chain) and is refused with the rule popup.
+    if (programNeedsDays(draft)) {
+      await showRuleViolationPopup(
+        context,
+        title: l.progRuleTitle,
+        messages: [switch (draft.cycle) {
+          CycleType.weekly => l.noDaysWeekly(draft.name),
+          CycleType.monthly => l.noDaysMonthly(draft.name),
+          CycleType.annual => l.noDaysAnnual(draft.name),
+          CycleType.daily => '',
+        }],
+      );
       return;
     }
     final chainViolations = chainRuleViolations(draft.events);

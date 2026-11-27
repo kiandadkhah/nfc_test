@@ -13,6 +13,7 @@ import '../models/program.dart';
 import '../solar/chebyshev.dart';
 import '../solar/solar_events.dart';
 import '../utils/jalali.dart';
+import '../validation/validators.dart' show programNeedsDays;
 import 'memory_map.dart';
 import 'nfc_service.dart';
 import 'tag_link.dart';
@@ -206,6 +207,19 @@ class SotProtocol {
       _log.nfc('run: refused — program mode with no enabled programs');
       throw const TagLinkException('no_programs');
     }
+    // v4.4 guard — an enabled non-daily program without its own cycle days
+    // would encode orphan events that no day-table slot ever points at
+    // (the v4.3.0 field report: «ثبت برنامه بدون اختصاص روز»). The editor
+    // already blocks this; the transfer refuses it as the last defence.
+    if (req.mode == WriteMode.programAndSettings) {
+      final dayless = req.enabledPrograms.where(programNeedsDays).toList();
+      if (dayless.isNotEmpty) {
+        _log.nfc('run: refused — program(s) without assigned days: '
+            '${dayless.map((p) => '"${p.name}"').join(', ')}');
+        throw TagLinkException(
+            'program_without_days:${dayless.map((p) => p.name).join('|')}');
+      }
+    }
     final startCode =
         req.mode == WriteMode.programAndSettings ? ProcessCodes.programStart : ProcessCodes.settingsStart;
     final completeCode =
@@ -283,16 +297,30 @@ class SotProtocol {
             final logger = await readLoggerBlocks();
             final snap = LoggerSnapshot.fromBlocks(logger);
             runVersion = snap.runProgramCounter;
-            // A blank logger (0xFFFF counter / empty CRC) means the MCU is
-            // not running — the relay has no power supply. The protocol
-            // halts here and the caller decides how to continue.
-            final unpowered = snap.runProgramCounter == 0 ||
-                snap.runProgramCounter == 0xFFFF ||
-                snap.logCrc32 == 0 ||
-                snap.logCrc32 == 0xFFFFFFFF;
+            // v4.4 — the power-supply state comes from the ST25DV16KC
+            // itself: EH_CTRL_Dyn carries the live FIELD_ON/EH_ON/VCC_ON
+            // status bits (field report: «برای بررسی تغذیه تگ باید از
+            // رجیسترهای st25dv16kc استفاده کنی»). The logger heuristic only
+            // runs when the tag does not answer the custom register command.
+            final power = await _link.readPowerStatus();
+            bool unpowered;
+            if (power != null) {
+              _log.nfc('step2: power register $power → '
+                  'relay ${power.vccOn ? 'powered' : 'UNPOWERED'}');
+              unpowered = !power.vccOn;
+            } else {
+              unpowered = snap.runProgramCounter == 0 ||
+                  snap.runProgramCounter == 0xFFFF ||
+                  snap.logCrc32 == 0 ||
+                  snap.logCrc32 == 0xFFFFFFFF;
+              _log.nfc('step2: power register unavailable — logger heuristic '
+                  '(run=${snap.runProgramCounter}, logCrc=${snap.logCrc32}) '
+                  '→ ${unpowered ? 'UNPOWERED' : 'powered'}');
+            }
+            // The protocol halts here on an unpowered relay and the caller
+            // decides how to continue.
             if (unpowered && !skipClock) {
-              _log.nfc('step2: relay without power supply detected '
-                  '(run=${snap.runProgramCounter}, logCrc=${snap.logCrc32})');
+              _log.nfc('step2: relay without power supply detected');
               emit(step, StepStatus.active, powerOff: true);
               return null;
             }
@@ -318,7 +346,7 @@ class SotProtocol {
             // v4.2.0 field analysis (APP_CRC32 = CRC of an all-zero payload
             // = 0x0993D8D7 on the real tag) proved that silent write loss
             // was being validated as success before.
-            final plan = _buildPlan(req, runVersion + 1, skipClock);
+            final plan = await _buildPlan(req, runVersion + 1, skipClock);
             await _writeRange(plan.blocks, plan.dataOf, (done, total) {
               _log.nfc('step4: blocks $done/$total written+verified');
             });
@@ -374,12 +402,14 @@ class SotProtocol {
             if (recomputed != storedCrc) {
               throw TagLinkException('crc_mismatch:${recomputed.toRadixString(16)}!=${storedCrc.toRadixString(16)}');
             }
-            // v4.3 sentinel — the CRC of an ALL-ZERO planning payload is
+            // v4.4 sentinel — the CRC of an ALL-ZERO planning payload is
             // 0x0993D8D7 (proven by the v4.2.0 field analysis). A complete
             // program transfer can never produce that value: the solar
-            // coefficients and the clock bytes alone are non-zero.
+            // coefficients and the clock bytes alone are non-zero. With the
+            // v4.4 full-image plan this guard holds for BOTH paths (clock
+            // sync and the unpowered continue) — the coefficients are
+            // always part of the payload.
             if (req.mode == WriteMode.programAndSettings &&
-                !skipClock &&
                 req.enabledPrograms.isNotEmpty &&
                 recomputed == payloadEmptyCrc) {
               _log.nfc('step7: payload sentinel hit — read-back CRC equals the '
@@ -419,18 +449,50 @@ class SotProtocol {
   List<Uint8List>? _readBackImage;
 
   /// Builds the write plan for the requested mode and payload.
-  _Plan _buildPlan(SotWriteRequest req, int newCounter, bool skipClock) {
+  ///
+  /// v4.4 — the program mode builds the FULL planning image (blocks
+  /// 16..431) in EVERY case. The former `skipClock → settings-only plan`
+  /// branch was the root cause of the v4.3.0 field bug: when the user
+  /// continued on an unpowered relay, only the 14 coefficient/SET blocks
+  /// were written and every program value stayed at zero
+  /// (APP_CRC32 = 0x0993D8D7 = CRC of the empty image). `skipClock` now
+  /// ONLY decides whether the SET blocks carry a new clock (powered path)
+  /// or the bytes currently stored on the tag are preserved unchanged
+  /// (unpowered-continue path).
+  Future<_Plan> _buildPlan(SotWriteRequest req, int newCounter, bool skipClock) async {
     final (sr, ss) = solarCoefficientsFor(req);
     final jalali = gregorianToJalali(req.deviceTime);
     final clock = JalaliClock(year2: jalali.year % 100, month: jalali.month, day: jalali.day);
 
-    if (req.mode == WriteMode.settingsOnly || skipClock) {
+    if (req.mode == WriteMode.settingsOnly) {
+      // Settings-only transfer (coefficients + clock, blocks 416..429).
+      // The settings flow never reaches this point with skipClock — the
+      // power-off halt blocks it before the transfer starts.
       final img = PlanningImage();
       img.setSolarCoefficients(sunriseQ14: sr, sunsetQ14: ss);
-      if (!skipClock) img.setClock(req.deviceTime, jalaliYear2: clock.year2, jalaliMonth: clock.month, jalaliDay: clock.day);
+      if (!skipClock) {
+        img.setClock(req.deviceTime,
+            jalaliYear2: clock.year2, jalaliMonth: clock.month, jalaliDay: clock.day);
+      }
       final blocks = List<int>.generate(14, (i) => SotMemoryMap.blockChebyshevSrStart + i);
       final override = img.bytes;
       return _Plan(blocks, (b) => Uint8List.sublistView(override, (b - SotMemoryMap.blockChebyshevSrStart) * 4));
+    }
+
+    List<int>? preservedSet;
+    if (skipClock) {
+      // Preserve the clock/calendar bytes currently stored on the tag so
+      // the full-image rewrite never destroys a running device clock —
+      // also the only safe behaviour if the register check ever
+      // misclassifies a powered device as unpowered.
+      final setBlocks = await _readRange(
+          SotMemoryMap.blockSet, SotMemoryMap.blockSetDate, null);
+      preservedSet = <int>[
+        ...setBlocks[0],
+        ...setBlocks[1],
+      ];
+      _log.nfc('step4: skipClock — SET bytes preserved from the tag '
+          '(${preservedSet.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')})');
     }
 
     final plan = buildProgramWritePlan(
@@ -440,6 +502,8 @@ class SotProtocol {
       sunriseQ14: sr,
       sunsetQ14: ss,
       newProgramCounter: newCounter,
+      writeClock: !skipClock,
+      preservedSetBytes: preservedSet,
     );
     return _Plan(
         List<int>.generate(416, (i) => SotMemoryMap.planningStartBlock + i),

@@ -119,6 +119,16 @@ class ProgramsController extends ChangeNotifier {
   void setDraftCycle(CycleType cycle) {
     if (_draft == null) return;
     _draft!.cycle = cycle;
+    // v4.4 — a cycle switch must not silently keep the day lists of the
+    // OTHER cycles: the stale lists made the old combined «needsDays»
+    // sum check pass and produced day-less programs (v4.3.0 field bug:
+    // «کاربر می‌تواند بدون اختصاص روز برنامه را ثبت کند»). The payload
+    // builder reads only the program's own cycle list, so stale lists
+    // are dead data at best and a validation hole at worst.
+    final a = _draft!.assign;
+    if (cycle != CycleType.weekly) a.weekly.clear();
+    if (cycle != CycleType.monthly) a.monthly.clear();
+    if (cycle != CycleType.annual) a.annualDays.clear();
     notifyListeners();
   }
 
@@ -187,6 +197,10 @@ class ProgramsController extends ChangeNotifier {
   bool saveDraft() {
     final d = _draft;
     if (d == null || d.name.isEmpty || d.events.isEmpty) return false;
+    // v4.4 hard guard — a non-daily program without its own cycle days can
+    // never be persisted (popup path in the editor; this is the last line
+    // of defence for any future caller).
+    if (programNeedsDays(d)) return false;
     if (chainRuleViolations(d.events).isNotEmpty) return false;
     // Capacity is checked against the REAL write payload: enabled programs
     // only, the edited program replaced by the draft.

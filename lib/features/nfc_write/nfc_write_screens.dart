@@ -451,6 +451,7 @@ class _WriteProgressDialogState extends ConsumerState<WriteProgressDialog> {
       return l.wpFailPayload;
     }
     if (code.startsWith('no_programs')) return l.wpFailNoPrograms;
+    if (code.startsWith('program_without_days')) return l.wpFailNoDays;
     if (code.startsWith('link_invalid') ||
         code.startsWith('model_unsupported') ||
         code.startsWith('model_mismatch')) {
